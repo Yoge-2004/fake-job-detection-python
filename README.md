@@ -98,6 +98,3 @@ Fake_Job_Detection_Python/
 
 ---
 *Disclaimer: This tool is for educational purposes.*
-
-
-=== Code Execution Successful ===
