@@ -87,6 +87,7 @@ Fake_Job_Detection_Python/
 │
 ├── fake_job_postings.csv   # Dataset
 ├── production_fake_job_pipeline.pkl     # Trained model
+├── results.csv           # Test Results
 ├── app.py                 # Main script
 ├── requirements.txt        # Dependencies
 └── README.md               # Documentation
