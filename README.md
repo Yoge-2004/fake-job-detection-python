@@ -7,12 +7,12 @@
 A Machine Learning project designed to identify fraudulent job postings and recruitment scams. This system utilizes Natural Language Processing (NLP) to analyze job descriptions and classify them as 'Real' or 'Fake' (Scam).
 
 ## 📋 Table of Contents
-- [Overview](#overview)
-- [Tech Stack](#tech-stack)
-- [Installation](#-installation)
-- [Usage](#usage)
-- [File Structure](#file-structure)
-- [Contact](#contact)
+- [🧐 Overview](#overview)
+- [🛠 Tech Stack](#tech-stack)
+- [⚙️ Installation](#-installation)
+- [🚀 Usage](#usage)
+- [📂 File Structure](#file-structure)
+- [👤 Author](#author)
 
 ## 🧐 Overview
 Recruitment scams are becoming increasingly sophisticated. This project leverages the power of **spaCy** for text processing and **Scikit-Learn** for classification to screen job descriptions.
