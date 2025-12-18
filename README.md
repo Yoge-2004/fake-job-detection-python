@@ -9,7 +9,7 @@ A Machine Learning project designed to identify fraudulent job postings and recr
 ## 📋 Table of Contents
 - [Overview](#overview)
 - [Tech Stack](#tech-stack)
-- [Installation](#installation)
+- [Installation](#-installation)
 - [Usage](#usage)
 - [File Structure](#file-structure)
 - [Contact](#contact)
