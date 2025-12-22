@@ -85,12 +85,30 @@ print(f'Verdict: {prediction[0]}')
 ```text
 Fake_Job_Detection_Python/
 │
-├── fake_job_postings.csv   # Dataset
-├── production_fake_job_pipeline.pkl     # Trained model
-├── results.csv           # Test Results
-├── app.py                 # Main script
-├── requirements.txt        # Dependencies
-└── README.md               # Documentation
+├── app.py                            # Main Flask Application (Backend)
+├── test.py                           # Script to train model/test accuracy
+├── requirements.txt                  # Python dependencies
+├── README.md                         # Project documentation
+│
+├── users.db                          # SQLite Database (Auto-created by app.py)
+├── fake_job_postings.csv             # Raw Dataset
+├── results.csv                       # Analysis results (Optional)
+│
+├── production_fake_job_pipeline.pkl  # Main Spacy Model (File 1)
+├── mobile_model.pkl                  # Lightweight Fallback Model (File 2)
+│
+├── templates/                        # HTML Files
+│   ├── index.html                    # Dashboard Page
+│   └── login.html                    # Login/Signup Page
+│
+└── static/                           # CSS, JS, Images
+    ├── css/
+    │   ├── style.css                 # Dashboard Styling
+    │   └── login.css                 # Login Page Styling
+    └── js/
+        ├── script.js                 # Dashboard Logic (Scanner, Matrix, API)
+        └── login.js                  # Login Logic (Auth, Animation)
+
 ```
 
 ## 👤 Author
