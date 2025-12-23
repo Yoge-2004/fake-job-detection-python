@@ -13,7 +13,8 @@ A Machine Learning project designed to identify fraudulent job postings and recr
 - [🚀 Usage](#-usage)
 - [📂 File Structure](#-file-structure)
 - [👤 Author](#-author)
-
+- [📜 License](#-license)
+- 
 ## 🧐 Overview
 Recruitment scams are becoming increasingly sophisticated. This project leverages the power of **spaCy** for text processing and **Scikit-Learn** for classification to screen job descriptions.
 
@@ -113,6 +114,11 @@ Fake_Job_Detection_Python/
 ## 👤 Author
 **Yoge-2004**
 * GitHub: [Yoge-2004](https://github.com/Yoge-2004)
+
+## 📜 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
 
 ---
 *Disclaimer: This tool is for educational purposes.*
