@@ -14,7 +14,7 @@ A Machine Learning project designed to identify fraudulent job postings and recr
 - [📂 File Structure](#-file-structure)
 - [👤 Author](#-author)
 - [📜 License](#-license)
-- 
+
 ## 🧐 Overview
 Recruitment scams are becoming increasingly sophisticated. This project leverages the power of **spaCy** for text processing and **Scikit-Learn** for classification to screen job descriptions.
 
