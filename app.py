@@ -85,6 +85,15 @@ class SpacyVectorTransformer(BaseEstimator, TransformerMixin):
             return np.zeros((len(X), 300))
 
 # ==========================================
+# 🛑 FIX FOR HUGGING FACE DEPLOYMENT
+# ==========================================
+import sys
+# Trick pickle into finding the classes in '__main__' even when running in Gunicorn
+if __name__ != '__main__':
+    sys.modules['__main__'] = sys.modules[__name__]
+# ==========================================
+
+# ==========================================
 # 2. HUMAN REASONING ENGINE
 # ==========================================
 def explain_like_a_human(text, label, lime_features):
