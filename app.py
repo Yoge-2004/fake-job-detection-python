@@ -117,8 +117,9 @@ if os.path.exists(MODEL_FILE):
     except Exception as e:
         log_debug(f"Model Load Failed: {str(e)}", "ERROR")
 
+
 # ==========================================
-# 3. PREDICTION LOGIC (FIXED)
+# 3. PREDICTION LOGIC (NUMBERS & CURRENCY FIX)
 # ==========================================
 @app.route('/predict', methods=['POST'])
 def predict():
@@ -143,7 +144,6 @@ def predict():
         reasons = []
 
         # --- A. PRE-CHECK: KNOWN SCAM TRIGGERS (BYPASS GIBBERISH) ---
-        # If we see these words, it's definitely NOT gibberish, it's a SCAM.
         has_scam_keywords = False
         scam_keywords = ["telegram", "whatsapp", "kindly deposit", "send a check", "equipment"]
         for key in scam_keywords:
@@ -153,6 +153,7 @@ def predict():
 
         # --- B. REGEX GIBBERISH CHECKS ---
         if not has_scam_keywords:
+            # Removed strict regex checks for numbers/symbols to allow salaries
             if REGEX_LONG_STRING.search(text) and "http" not in text:
                 is_gibberish = True
                 reasons.append("🚫 **Input Error:** Suspicious long strings detected.")
@@ -163,13 +164,16 @@ def predict():
             if not is_gibberish:
                 words_raw = text_lower.split()
                 for w in words_raw:
-                    if len(w) > 6 and not REGEX_CONSONANT_SMASH.search(w) and "http" not in w:
-                        is_gibberish = True
-                        req_log(f"Consonant Smash Detected: {w}", "WARN")
-                        reasons.append("🚫 **Gibberish:** Random key-mashing detected.")
-                        break
+                    # Allow numbers and symbols in words (e.g., $40,000)
+                    if len(w) > 10 and not REGEX_CONSONANT_SMASH.search(w) and "http" not in w:
+                         # Relaxed check: Only flag if NO numbers are present
+                        if not any(char.isdigit() for char in w): 
+                            is_gibberish = True
+                            req_log(f"Consonant Smash Detected: {w}", "WARN")
+                            reasons.append("🚫 **Gibberish:** Random key-mashing detected.")
+                            break
 
-        # --- C. SPACY DICTIONARY CHECK ---
+        # --- C. SPACY DICTIONARY CHECK (UPDATED FOR NUMBERS) ---
         if not is_gibberish and not has_scam_keywords:
             total_words = 0
             valid_words = 0
@@ -177,9 +181,14 @@ def predict():
                 doc = nlp_engine(text)
                 g.spacy_doc = doc 
                 for t in doc:
-                    if t.is_alpha: # Ignore numbers (401k) & symbols
-                        total_words += 1
-                        if t.has_vector: valid_words += 1
+                    # FIX: Count Token if it is Alpha OR Number OR Currency
+                    if t.is_alpha or t.like_num or t.is_currency or not t.is_punct:
+                        # Ignore pure punctuation/spaces, count everything else
+                        if not t.is_space and not t.is_punct:
+                            total_words += 1
+                            # It is VALID if it has vector OR is a number OR is currency ($)
+                            if t.has_vector or t.like_num or t.is_currency:
+                                valid_words += 1
             else:
                 words = REGEX_WORD_TOKEN.findall(text_lower)
                 total_words = len(words)
@@ -195,7 +204,7 @@ def predict():
             elif 5 <= total_words <= 20 and ratio < 0.4:
                 is_gibberish = True
                 reasons.append("🚫 **Gibberish:** Text contains mostly random words.")
-            elif total_words > 20 and ratio < 0.15: # Lowered to 15% to allow for 401k/Phones
+            elif total_words > 20 and ratio < 0.15: 
                 is_gibberish = True
                 reasons.append("🚫 **Gibberish:** Text structure is incoherent.")
             
@@ -215,7 +224,6 @@ def predict():
             human_reasons = []
             override_active = False
 
-            # Hardcoded Triggers
             critical_triggers = {
                 "telegram": "🚨 **CRITICAL:** 'Telegram' is used 99% by scammers.",
                 "whatsapp": "🚨 **CRITICAL:** 'WhatsApp' interview request detected.",
@@ -238,9 +246,8 @@ def predict():
                     fake_prob += 0.10
                     human_reasons.append("⚠️ **Urgency:** Scammers often create fake urgency.")
 
-                # LIME Logic
                 try:
-                    exp = explainer.explain_instance(text, model.predict_proba, num_features=5, num_samples=1000)
+                    exp = explainer.explain_instance(text, model.predict_proba, num_features=5, num_samples=500)
                     lime_list = exp.as_list()
                     suspicious_words = [w for w, s in lime_list if s > 0.05]
                     
@@ -269,6 +276,7 @@ def predict():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+        
 # ==========================================
 # 4. AUTH & DB
 # ==========================================
@@ -331,4 +339,3 @@ def dashboard_page():
 
 if __name__ == '__main__':
     app.run(debug=True)
-                
