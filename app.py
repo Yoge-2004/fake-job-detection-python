@@ -13,8 +13,6 @@ import traceback
 import sklearn
 from datetime import datetime, timedelta
 from werkzeug.security import generate_password_hash, check_password_hash
-
-# --- NEW IMPORT FOR EXPLAINABLE AI ---
 from lime.lime_text import LimeTextExplainer
 
 app = Flask(__name__)
@@ -35,9 +33,6 @@ REGEX_SPACES = re.compile(r'\s+')
 REGEX_WORD_TOKEN = re.compile(r'\w+')
 
 SERVER_LOGS = []
-
-# --- INITIALIZE LIME EXPLAINER ---
-# Class 0 = Real, Class 1 = Fake
 explainer = LimeTextExplainer(class_names=['Real', 'Fake'])
 
 def log_debug(message, level="INFO"):
@@ -123,7 +118,7 @@ if os.path.exists(MODEL_FILE):
         log_debug(f"Model Load Failed: {str(e)}", "ERROR")
 
 # ==========================================
-# 3. PREDICTION LOGIC WITH LIME
+# 3. PREDICTION LOGIC (FIXED)
 # ==========================================
 @app.route('/predict', methods=['POST'])
 def predict():
@@ -147,31 +142,42 @@ def predict():
         is_gibberish = False
         reasons = []
 
-        # --- A. REGEX CHECKS ---
-        if REGEX_LONG_STRING.search(text) and "http" not in text:
-            is_gibberish = True
-            reasons.append("🚫 **Input Error:** Suspicious long strings detected.")
-        if REGEX_REPEATED_CHARS.search(text_lower):
-            is_gibberish = True
-            reasons.append("🚫 **Gibberish:** Repetitive characters detected.")
+        # --- A. PRE-CHECK: KNOWN SCAM TRIGGERS (BYPASS GIBBERISH) ---
+        # If we see these words, it's definitely NOT gibberish, it's a SCAM.
+        has_scam_keywords = False
+        scam_keywords = ["telegram", "whatsapp", "kindly deposit", "send a check", "equipment"]
+        for key in scam_keywords:
+            if key in text_lower:
+                has_scam_keywords = True
+                break
 
-        if not is_gibberish:
-            words_raw = text_lower.split()
-            for w in words_raw:
-                if len(w) > 6 and not REGEX_CONSONANT_SMASH.search(w) and "http" not in w:
-                    is_gibberish = True
-                    req_log(f"Consonant Smash Detected: {w}", "WARN")
-                    reasons.append("🚫 **Gibberish:** Random key-mashing detected.")
-                    break
+        # --- B. REGEX GIBBERISH CHECKS ---
+        if not has_scam_keywords:
+            if REGEX_LONG_STRING.search(text) and "http" not in text:
+                is_gibberish = True
+                reasons.append("🚫 **Input Error:** Suspicious long strings detected.")
+            if REGEX_REPEATED_CHARS.search(text_lower):
+                is_gibberish = True
+                reasons.append("🚫 **Gibberish:** Repetitive characters detected.")
 
-        if not is_gibberish:
+            if not is_gibberish:
+                words_raw = text_lower.split()
+                for w in words_raw:
+                    if len(w) > 6 and not REGEX_CONSONANT_SMASH.search(w) and "http" not in w:
+                        is_gibberish = True
+                        req_log(f"Consonant Smash Detected: {w}", "WARN")
+                        reasons.append("🚫 **Gibberish:** Random key-mashing detected.")
+                        break
+
+        # --- C. SPACY DICTIONARY CHECK ---
+        if not is_gibberish and not has_scam_keywords:
             total_words = 0
             valid_words = 0
             if SPACY_AVAILABLE and nlp_engine:
                 doc = nlp_engine(text)
                 g.spacy_doc = doc 
                 for t in doc:
-                    if t.is_alpha:
+                    if t.is_alpha: # Ignore numbers (401k) & symbols
                         total_words += 1
                         if t.has_vector: valid_words += 1
             else:
@@ -182,13 +188,14 @@ def predict():
             ratio = valid_words / total_words if total_words > 0 else 0
             req_log(f"Stats: {valid_words}/{total_words} words (Ratio: {ratio:.2f})", "DEBUG")
             
+            # Relaxed Thresholds
             if total_words > 0 and total_words < 5 and ratio < 0.75:
                 is_gibberish = True
                 reasons.append("🚫 **Unknown Data:** Short text must be valid English.")
-            elif 5 <= total_words <= 20 and ratio < 0.5:
+            elif 5 <= total_words <= 20 and ratio < 0.4:
                 is_gibberish = True
                 reasons.append("🚫 **Gibberish:** Text contains mostly random words.")
-            elif total_words > 20 and ratio < 0.3:
+            elif total_words > 20 and ratio < 0.15: # Lowered to 15% to allow for 401k/Phones
                 is_gibberish = True
                 reasons.append("🚫 **Gibberish:** Text structure is incoherent.")
             
@@ -196,12 +203,11 @@ def predict():
                 is_gibberish = True
                 reasons.append("🚫 **Unknown Data:** AI cannot recognize this language.")
 
-        # --- PREDICTION & EXPLANATION ---
+        # --- D. FINAL PREDICTION ---
         result = {}
         if is_gibberish:
             result = {'fraud_probability': 100.0, 'reasons': reasons, 'is_gibberish': True}
         elif model:
-            # 1. Base Prediction
             proba = model.predict_proba([text])[0]
             fake_prob = proba[1]
             req_log(f"Base AI Score: {fake_prob:.4f}", "INFO")
@@ -209,7 +215,7 @@ def predict():
             human_reasons = []
             override_active = False
 
-            # 2. Hardcoded Triggers (Override AI)
+            # Hardcoded Triggers
             critical_triggers = {
                 "telegram": "🚨 **CRITICAL:** 'Telegram' is used 99% by scammers.",
                 "whatsapp": "🚨 **CRITICAL:** 'WhatsApp' interview request detected.",
@@ -232,27 +238,14 @@ def predict():
                     fake_prob += 0.10
                     human_reasons.append("⚠️ **Urgency:** Scammers often create fake urgency.")
 
-                # 3. LIME EXPLAINER (Run only if no hard override & score is relevant)
-                # Run LIME to find WHICH words caused the score
+                # LIME Logic
                 try:
-                    # num_samples=100 keeps it fast. Increase for accuracy but slower speed.
-                    exp = explainer.explain_instance(text, model.predict_proba, num_features=5, num_samples=5000)
+                    exp = explainer.explain_instance(text, model.predict_proba, num_features=5, num_samples=1000)
                     lime_list = exp.as_list()
+                    suspicious_words = [w for w, s in lime_list if s > 0.05]
                     
-                    suspicious_words = []
-                    safe_words = []
-                    
-                    for word, score in lime_list:
-                        if score > 0.05: # Adds to Fake score
-                            suspicious_words.append(word)
-                        elif score < -0.05: # Adds to Real score
-                            safe_words.append(word)
-                            
                     if suspicious_words and fake_prob > 0.5:
                         human_reasons.append(f"🔍 **AI Insight:** High risk words found: '{', '.join(suspicious_words)}'")
-                    elif safe_words and fake_prob < 0.5:
-                        human_reasons.append(f"🔍 **AI Insight:** Trustworthy words found: '{', '.join(safe_words)}'")
-                        
                 except Exception as lime_e:
                     req_log(f"LIME Error: {str(lime_e)}", "ERROR")
 
@@ -338,3 +331,4 @@ def dashboard_page():
 
 if __name__ == '__main__':
     app.run(debug=True)
+                
