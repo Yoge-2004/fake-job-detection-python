@@ -2,6 +2,7 @@ import warnings
 # warnings.filterwarnings("ignore") 
 
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for, g
+from flask_caching import Cache
 from sklearn.base import BaseEstimator, TransformerMixin
 import joblib
 import os
@@ -9,11 +10,11 @@ import re
 import numpy as np
 import sqlite3
 import sys
-import traceback
-import sklearn
+import hashlib
 from datetime import datetime, timedelta
 from werkzeug.security import generate_password_hash, check_password_hash
 from lime.lime_text import LimeTextExplainer
+from flashtext import KeywordProcessor
 
 app = Flask(__name__)
 app.secret_key = "jobguard_super_secret_key"
@@ -21,7 +22,17 @@ app.permanent_session_lifetime = timedelta(days=30)
 DB_NAME = "users.db"
 
 # ==========================================
-# 0. CONFIG & OPTIMIZATIONS
+# 0. CACHE CONFIGURATION
+# ==========================================
+cache_config = {
+    "CACHE_TYPE": "SimpleCache", 
+    "CACHE_DEFAULT_TIMEOUT": 3600
+}
+app.config.from_mapping(cache_config)
+cache = Cache(app)
+
+# ==========================================
+# 1. OPTIMIZATIONS & FLASHTEXT
 # ==========================================
 REGEX_LONG_STRING = re.compile(r'\S{40,}')
 REGEX_REPEATED_CHARS = re.compile(r'(.)\1{4,}')
@@ -32,8 +43,27 @@ REGEX_SPECIAL_CHARS = re.compile(r'[^a-z0-9\s\$\%\@\.\,\!]')
 REGEX_SPACES = re.compile(r'\s+')
 REGEX_WORD_TOKEN = re.compile(r'\w+')
 
+# Global Server Logs (For Console/History)
 SERVER_LOGS = []
 explainer = LimeTextExplainer(class_names=['Real', 'Fake'])
+
+# --- FLASHTEXT SETUP ---
+scam_processor = KeywordProcessor(case_sensitive=False)
+scam_terms = {
+    "telegram": "🚨 **CRITICAL:** 'Telegram' is used 99% by scammers.",
+    "whatsapp": "🚨 **CRITICAL:** 'WhatsApp' interview request detected.",
+    "signal": "🚨 **CRITICAL:** 'Signal App' is a major red flag for interviews.",
+    "wire": "🚨 **CRITICAL:** 'Wire Transfer' request detected.",
+    "kindly deposit": "💸 **FRAUD:** 'Kindly deposit' is a known scam phrase.",
+    "check to purchase": "💸 **FRAUD:** Fake Equipment Check Scam detected.",
+    "send a check": "💸 **FRAUD:** Fake Check Scam detected.",
+    "cashier check": "💸 **FRAUD:** 'Cashier Check' is a common banking scam.",
+    "no human resources": "⚠️ **Suspicious:** 'No HR screening' is highly unusual.",
+    "no interview": "⚠️ **Suspicious:** Skipping interview process is a scam tactic.",
+    "encrypted credential": "⚠️ **Suspicious:** Asking for credentials via chat is unsafe."
+}
+for term, reason in scam_terms.items():
+    scam_processor.add_keyword(term, reason)
 
 def log_debug(message, level="INFO"):
     timestamp = datetime.now().strftime("%H:%M:%S")
@@ -43,7 +73,7 @@ def log_debug(message, level="INFO"):
     print(entry, flush=True)
 
 # ==========================================
-# 1. CUSTOM CLASSES
+# 2. CUSTOM CLASSES
 # ==========================================
 class TextCleaner(BaseEstimator, TransformerMixin):
     def fit(self, X, y=None): return self
@@ -74,9 +104,6 @@ class SpacyVectorTransformer(BaseEstimator, TransformerMixin):
 if __name__ != '__main__':
     sys.modules['__main__'] = sys.modules[__name__]
 
-# ==========================================
-# 2. LOAD RESOURCES
-# ==========================================
 SPACY_AVAILABLE = False
 nlp_engine = None
 
@@ -92,13 +119,8 @@ try:
             SPACY_AVAILABLE = True
             log_debug("Spacy 'lg' missing. Loaded 'md'.", "WARN")
         except:
-            try:
-                nlp_engine = spacy.load("en_core_web_sm")
-                SPACY_AVAILABLE = True
-                log_debug("Spacy 'md' missing. Loaded 'sm'.", "WARN")
-            except:
-                nlp_engine = spacy.blank("en")
-                log_debug("Spacy failed. Using Blank.", "ERROR")
+            nlp_engine = spacy.blank("en")
+            log_debug("Spacy failed. Using Blank.", "ERROR")
 except ImportError:
     log_debug("Spacy Not Installed.", "ERROR")
 
@@ -117,19 +139,23 @@ if os.path.exists(MODEL_FILE):
     except Exception as e:
         log_debug(f"Model Load Failed: {str(e)}", "ERROR")
 
-
 # ==========================================
-# 3. PREDICTION LOGIC (NUMBERS & CURRENCY FIX)
+# 3. PREDICTION LOGIC (VERBOSE LOGGING)
 # ==========================================
 @app.route('/predict', methods=['POST'])
 def predict():
     current_user = session.get('user', '')
     is_admin = (current_user == 'Yoge')
     
-    current_request_logs = []
-    def req_log(msg, lvl="INFO"):
+    # Trace Logs: To be sent to UI (Specific to this request)
+    trace_logs = [] 
+    
+    def trace(msg, lvl="INFO"):
+        """Adds log to both Server Console and UI Response"""
         log_debug(msg, lvl)
-        if is_admin: current_request_logs.append(f"[{lvl}] {msg}")
+        if is_admin: 
+            timestamp = datetime.now().strftime("%H:%M:%S")
+            trace_logs.append(f"[{timestamp}] [{lvl}] {msg}")
 
     if not current_user: return jsonify({'error': 'Unauthorized'}), 401
     
@@ -139,54 +165,71 @@ def predict():
         text_lower = text.lower()
         if not text: return jsonify({'error': 'Empty data'}), 400
 
+        # --- CACHE CHECK ---
+        text_hash = hashlib.md5(text_lower.encode('utf-8')).hexdigest()
+        cached_result = cache.get(text_hash)
+        
+        if cached_result:
+            trace("⚡ Cache Hit! Retrieving stored analysis...", "SUCCESS")
+            # Retrieve OLD logs from cache to show them again
+            if 'trace_logs' in cached_result and is_admin:
+                trace_logs.extend(cached_result['trace_logs'])
+                cached_result['system_logs'] = list(reversed(trace_logs)) # Update with new hit log
+            return jsonify(cached_result)
+
+        # --- IF NOT IN CACHE, START FRESH ANALYSIS ---
+        trace(f"📉 Incoming Request: {len(text)} chars", "DEBUG")
+        
         g.spacy_doc = None
         is_gibberish = False
         reasons = []
 
-        # --- A. PRE-CHECK: KNOWN SCAM TRIGGERS (BYPASS GIBBERISH) ---
-        has_scam_keywords = False
-        scam_keywords = ["telegram", "whatsapp", "kindly deposit", "send a check", "equipment"]
-        for key in scam_keywords:
-            if key in text_lower:
-                has_scam_keywords = True
-                break
+        # A. FAST SCAM CHECK (FlashText)
+        trace("🔍 Running FlashText Keyword Search...", "DEBUG")
+        found_scam_reasons = scam_processor.extract_keywords(text)
+        found_scam_reasons = list(set(found_scam_reasons))
+        
+        has_scam_keywords = len(found_scam_reasons) > 0
+        if has_scam_keywords:
+            trace(f"🚨 FlashText Found Triggers: {len(found_scam_reasons)} detected", "WARN")
+        else:
+            trace("✅ FlashText: No Hardcoded Scams found.", "DEBUG")
 
-        # --- B. REGEX GIBBERISH CHECKS ---
+        # B. REGEX CHECKS
         if not has_scam_keywords:
-            # Removed strict regex checks for numbers/symbols to allow salaries
+            trace("🧩 Running Regex Pattern Matching...", "DEBUG")
             if REGEX_LONG_STRING.search(text) and "http" not in text:
                 is_gibberish = True
+                trace("🚫 Regex: Suspicious Long String detected.", "WARN")
                 reasons.append("🚫 **Input Error:** Suspicious long strings detected.")
+            
             if REGEX_REPEATED_CHARS.search(text_lower):
                 is_gibberish = True
+                trace("🚫 Regex: Repetitive Characters detected.", "WARN")
                 reasons.append("🚫 **Gibberish:** Repetitive characters detected.")
 
             if not is_gibberish:
                 words_raw = text_lower.split()
                 for w in words_raw:
-                    # Allow numbers and symbols in words (e.g., $40,000)
                     if len(w) > 10 and not REGEX_CONSONANT_SMASH.search(w) and "http" not in w:
-                         # Relaxed check: Only flag if NO numbers are present
                         if not any(char.isdigit() for char in w): 
                             is_gibberish = True
-                            req_log(f"Consonant Smash Detected: {w}", "WARN")
+                            trace(f"🚫 Regex: Consonant Smash in '{w}'", "WARN")
                             reasons.append("🚫 **Gibberish:** Random key-mashing detected.")
                             break
 
-        # --- C. SPACY DICTIONARY CHECK (UPDATED FOR NUMBERS) ---
+        # C. SPACY CHECK
         if not is_gibberish and not has_scam_keywords:
+            trace(f"🧠 Spacy ({nlp_engine.meta['name'] if nlp_engine else 'None'}) Analysis Started...", "DEBUG")
             total_words = 0
             valid_words = 0
             if SPACY_AVAILABLE and nlp_engine:
                 doc = nlp_engine(text)
                 g.spacy_doc = doc 
                 for t in doc:
-                    # FIX: Count Token if it is Alpha OR Number OR Currency
                     if t.is_alpha or t.like_num or t.is_currency or not t.is_punct:
-                        # Ignore pure punctuation/spaces, count everything else
                         if not t.is_space and not t.is_punct:
                             total_words += 1
-                            # It is VALID if it has vector OR is a number OR is currency ($)
                             if t.has_vector or t.like_num or t.is_currency:
                                 valid_words += 1
             else:
@@ -195,66 +238,69 @@ def predict():
                 valid_words = total_words
 
             ratio = valid_words / total_words if total_words > 0 else 0
-            req_log(f"Stats: {valid_words}/{total_words} words (Ratio: {ratio:.2f})", "DEBUG")
+            trace(f"📊 Spacy Stats: {valid_words}/{total_words} Valid Words (Ratio: {ratio:.2f})", "INFO")
             
-            # Relaxed Thresholds
             if total_words > 0 and total_words < 5 and ratio < 0.75:
                 is_gibberish = True
+                trace("🚫 Spacy: Text too short.", "WARN")
                 reasons.append("🚫 **Unknown Data:** Short text must be valid English.")
             elif 5 <= total_words <= 20 and ratio < 0.4:
                 is_gibberish = True
+                trace("🚫 Spacy: Low valid word ratio (< 0.4).", "WARN")
                 reasons.append("🚫 **Gibberish:** Text contains mostly random words.")
             elif total_words > 20 and ratio < 0.15: 
                 is_gibberish = True
+                trace("🚫 Spacy: Very low valid word ratio (< 0.15).", "WARN")
                 reasons.append("🚫 **Gibberish:** Text structure is incoherent.")
-            
-            if total_words > 0 and valid_words == 0:
-                is_gibberish = True
-                reasons.append("🚫 **Unknown Data:** AI cannot recognize this language.")
 
-        # --- D. FINAL PREDICTION ---
+        # D. PREDICTION
         result = {}
         if is_gibberish:
+            trace("❌ Verdict: Gibberish Detected.", "ERROR")
             result = {'fraud_probability': 100.0, 'reasons': reasons, 'is_gibberish': True}
         elif model:
+            # 1. Base AI Prediction
+            trace("🤖 Invoking Scikit-Learn Pipeline...", "DEBUG")
             proba = model.predict_proba([text])[0]
             fake_prob = proba[1]
-            req_log(f"Base AI Score: {fake_prob:.4f}", "INFO")
+            trace(f"🔢 Base Model Probability: {fake_prob:.4f}", "INFO")
             
             human_reasons = []
             override_active = False
 
-            critical_triggers = {
-                "telegram": "🚨 **CRITICAL:** 'Telegram' is used 99% by scammers.",
-                "whatsapp": "🚨 **CRITICAL:** 'WhatsApp' interview request detected.",
-                "kindly deposit": "💸 **FRAUD:** 'Kindly deposit' is a known scam phrase.",
-                "check to purchase": "💸 **FRAUD:** Fake Equipment Check Scam detected.",
-                "send a check": "💸 **FRAUD:** Fake Check Scam detected."
-            }
+            # 2. CRITICAL TRIGGERS (FlashText)
+            if has_scam_keywords:
+                fake_prob = 0.99
+                human_reasons.extend(found_scam_reasons)
+                override_active = True
+                trace("🔒 Hardcoded Override Active: Score set to 99%", "WARN")
 
-            for key, reason in critical_triggers.items():
-                if key in text_lower:
-                    fake_prob = 0.99 
-                    human_reasons.append(reason)
-                    override_active = True
-
+            # 3. Soft Triggers & LIME
             if not override_active:
                 if "@gmail.com" in text_lower or "@yahoo.com" in text_lower:
                     fake_prob += 0.30 
+                    trace("⚠️ Trigger: Personal Email Domain found.", "WARN")
                     human_reasons.append("⚠️ **Suspicious:** Using personal email for corporate role.")
                 if "urgent" in text_lower or "immediate" in text_lower:
                     fake_prob += 0.10
+                    trace("⚠️ Trigger: Urgency keywords found.", "WARN")
                     human_reasons.append("⚠️ **Urgency:** Scammers often create fake urgency.")
 
                 try:
+                    trace("🍋 Running LIME Explainer (Samples=500)...", "DEBUG")
                     exp = explainer.explain_instance(text, model.predict_proba, num_features=5, num_samples=500)
                     lime_list = exp.as_list()
-                    suspicious_words = [w for w, s in lime_list if s > 0.05]
                     
+                    suspicious_words = [w for w, s in lime_list if s > 0.05]
+                    safe_words = [w for w, s in lime_list if s < -0.05]
+                    
+                    trace(f"🔍 LIME Suspicious: {suspicious_words}", "DEBUG")
+                    trace(f"🛡️ LIME Safe: {safe_words}", "DEBUG")
+
                     if suspicious_words and fake_prob > 0.5:
                         human_reasons.append(f"🔍 **AI Insight:** High risk words found: '{', '.join(suspicious_words)}'")
                 except Exception as lime_e:
-                    req_log(f"LIME Error: {str(lime_e)}", "ERROR")
+                    trace(f"LIME Error: {str(lime_e)}", "ERROR")
 
             fake_prob = min(max(fake_prob, 0.0), 1.0)
 
@@ -265,20 +311,29 @@ def predict():
             else:
                 if not human_reasons: human_reasons.append("✅ **System Clean:** No known threats detected.")
 
-            req_log(f"Final Risk Score: {fake_prob:.4f}", "SUCCESS")
+            trace(f"🏆 Final Calculated Risk Score: {fake_prob:.4f}", "SUCCESS")
             result = {'fraud_probability': round(fake_prob * 100, 2), 'reasons': human_reasons, 'is_gibberish': False}
+            
+            # --- SAVE TO CACHE (INCLUDE LOGS) ---
+            # We save the trace_logs INSIDE the cache value so they can be replayed
+            result['trace_logs'] = trace_logs 
+            cache.set(text_hash, result)
+            trace("💾 Result & Logs saved to Cache.", "DEBUG")
+
         else:
             result = {'fraud_probability': 0, 'reasons': ["Mock Mode"], 'is_gibberish': False}
 
-        result['system_logs'] = list(reversed(SERVER_LOGS)) if is_admin else None
+        # Send logs to UI
+        result['system_logs'] = list(reversed(trace_logs)) if is_admin else None
         return jsonify(result)
 
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        error_msg = f"Internal Error: {str(e)}"
+        log_debug(error_msg, "ERROR")
+        return jsonify({'error': error_msg}), 500
 
-        
 # ==========================================
-# 4. AUTH & DB
+# 4. AUTH & DB (UNCHANGED)
 # ==========================================
 def init_db():
     with sqlite3.connect(DB_NAME) as conn:
