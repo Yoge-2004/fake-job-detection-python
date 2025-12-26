@@ -1,9 +1,8 @@
 import warnings
-# warnings.filterwarnings("ignore") 
-
+# warnings.filterwarnings("ignore")
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for, g
 from flask_caching import Cache
-from sklearn.base import BaseEstimator, TransformerMixin
+from sklearn.base import BaseEstimator, TransformerMixin, ClassifierMixin
 import joblib
 import os
 import re
@@ -16,58 +15,27 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from lime.lime_text import LimeTextExplainer
 from flashtext import KeywordProcessor
 
+# --- TENSORFLOW FOR UNSUPERVISED MODEL ---
+import tensorflow as tf
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Input, Dense, Dropout, BatchNormalization
+
 app = Flask(__name__)
 app.secret_key = "jobguard_super_secret_key"
-app.permanent_session_lifetime = timedelta(days=30) 
+app.permanent_session_lifetime = timedelta(days=30)
 DB_NAME = "users.db"
 
 # ==========================================
-# 0. CACHE CONFIGURATION
+# 0. CACHE & LOGGING CONFIG
 # ==========================================
 cache_config = {
-    "CACHE_TYPE": "SimpleCache", 
+    "CACHE_TYPE": "SimpleCache",
     "CACHE_DEFAULT_TIMEOUT": 3600
 }
 app.config.from_mapping(cache_config)
 cache = Cache(app)
 
-# ==========================================
-# 1. OPTIMIZATIONS & FLASHTEXT
-# ==========================================
-REGEX_LONG_STRING = re.compile(r'\S{40,}')
-REGEX_REPEATED_CHARS = re.compile(r'(.)\1{4,}')
-REGEX_CONSONANT_SMASH = re.compile(r'[aeiouy]')
-REGEX_HTTP = re.compile(r'http\S+|www\.\S+')
-REGEX_EMAIL = re.compile(r'\S+@\S+')
-REGEX_SPECIAL_CHARS = re.compile(r'[^a-z0-9\s\$\%\@\.\,\!]')
-REGEX_SPACES = re.compile(r'\s+')
-REGEX_WORD_TOKEN = re.compile(r'\w+')
-
-# Global Server Logs (For Console/History)
 SERVER_LOGS = []
-explainer = LimeTextExplainer(class_names=['Real', 'Fake'])
-
-# --- FLASHTEXT SETUP ---
-scam_processor = KeywordProcessor(case_sensitive=False)
-scam_terms = {
-    "telegram": "🚨 **CRITICAL:** 'Telegram' is used 99% by scammers.",
-    "whatsapp": "🚨 **CRITICAL:** 'WhatsApp' interview request detected.",
-    "signal": "🚨 **CRITICAL:** 'Signal App' is a major red flag for interviews.",
-    "wire": "🚨 **CRITICAL:** 'Wire Transfer' request detected.",
-    "kindly deposit": "💸 **FRAUD:** 'Kindly deposit' is a known scam phrase.",
-    "check to purchase": "💸 **FRAUD:** Fake Equipment Check Scam detected.",
-    "send a check": "💸 **FRAUD:** Fake Check Scam detected.",
-    "cashier check": "💸 **FRAUD:** 'Cashier Check' is a common banking scam.",
-    "no human resources": "⚠️ **Suspicious:** 'No HR screening' is highly unusual.",
-    "no interview": "⚠️ **Suspicious:** Skipping interview process is a scam tactic.",
-    "encrypted credential": "⚠️ **Suspicious:** Asking for credentials via chat is unsafe.",
-        # Add these to your scam_terms dictionary inside app.py
-    "update my profile": "🚨 **PHISHING:** Asking to click links to 'update profile' is a common data theft tactic.",
-    "update your profile": "🚨 **PHISHING:** Asking to click links to 'update profile' is a common data theft tactic.",
-    "click the link below": "⚠️ **Suspicious:** Instructing to click links often indicates phishing."
-}
-for term, reason in scam_terms.items():
-    scam_processor.add_keyword(term, reason)
 
 def log_debug(message, level="INFO"):
     timestamp = datetime.now().strftime("%H:%M:%S")
@@ -77,8 +45,60 @@ def log_debug(message, level="INFO"):
     print(entry, flush=True)
 
 # ==========================================
-# 2. CUSTOM CLASSES
+# 1. REGEX & FLASHTEXT SETUP
 # ==========================================
+REGEX_LONG_STRING = re.compile(r'\S{40,}')
+REGEX_REPEATED_CHARS = re.compile(r'(.)\1{4,}')
+REGEX_CONSONANT_SMASH = re.compile(r'[aeiouy]')
+REGEX_HTTP = re.compile(r'http\S+|www\.\S+')
+REGEX_EMAIL = re.compile(r'\S+@\S+')
+REGEX_SPECIAL_CHARS = re.compile(r'[^a-z0-9\s\$\%\@\.\,\!]')
+REGEX_SPACES = re.compile(r'\s+')
+REGEX_WORD_TOKEN = re.compile(r'\w+')
+REGEX_CODE_SNIPPET = re.compile(r'(;|{|}|\<script\>|SELECT \*|DROP TABLE)')
+
+# --- FLASHTEXT (HARDCODED RED FLAGS) ---
+scam_processor = KeywordProcessor(case_sensitive=False)
+scam_terms = {
+    "telegram": "🚨 **CRITICAL:** 'Telegram' is used 99% by scammers.",
+    "whatsapp": "🚨 **CRITICAL:** 'WhatsApp' interview request detected.",
+    "signal": "🚨 **CRITICAL:** 'Signal App' is a major red flag.",
+    "wire transfer": "🚨 **CRITICAL:** 'Wire Transfer' request detected.",
+    "kindly deposit": "💸 **FRAUD:** 'Kindly deposit' is a known scam phrase.",
+    "cashier check": "💸 **FRAUD:** 'Cashier Check' is a common banking scam.",
+    "no interview": "⚠️ **Suspicious:** Skipping interview process is a scam tactic.",
+    "update my profile": "🚨 **PHISHING:** Asking to click links to 'update profile'.",
+}
+for term, reason in scam_terms.items():
+    scam_processor.add_keyword(term, reason)
+
+# --- GREEN FLAGS (LEGITIMACY BOOSTERS) ---
+GREEN_FLAGS = ["401k", "health insurance", "pto", "tuition reimbursement", "dental", "vision", "on-site"]
+
+# ==========================================
+# 2. HELPER FUNCTIONS & CLASSES
+# ==========================================
+
+# --- A. Structural Feature Extractor ---
+def extract_structural_features(text):
+    text = str(text)
+    length = len(text) if len(text) > 0 else 1
+    
+    caps_count = sum(1 for c in text if c.isupper())
+    digit_count = sum(1 for c in text if c.isdigit())
+    special_count = len(re.findall(r'[^a-zA-Z0-9\s]', text))
+    has_email = 1 if re.search(r'\S+@\S+', text) else 0
+    has_phone = 1 if re.search(r'\b\d{10}\b|\+\d{1,3}', text) else 0
+    has_url = 1 if "http" in text or "www" in text else 0
+    word_count = len(text.split())
+
+    # Order matters! Must match Training Script
+    return [
+        caps_count/length, digit_count/length, special_count/length, 
+        has_email, has_phone, has_url, word_count
+    ]
+
+# --- B. CLASSES FOR SUPERVISED MODEL ---
 class TextCleaner(BaseEstimator, TransformerMixin):
     def fit(self, X, y=None): return self
     def transform(self, X):
@@ -105,12 +125,88 @@ class SpacyVectorTransformer(BaseEstimator, TransformerMixin):
         docs = list(self.nlp.pipe(X, disable=["ner", "parser"]))
         return np.array([doc.vector if doc.has_vector else np.zeros(300) for doc in docs])
 
+# --- C. ROBUST ANOMALY DETECTOR CLASS (UPDATED WITH DETAILED XAI) ---
+class RobustAnomalyDetector(BaseEstimator, ClassifierMixin):
+    def __init__(self, input_dim=307):
+        self.input_dim = input_dim
+        self.iso_model = None 
+        self.ae_threshold = 0.0
+        self.ae_weights = None 
+        self.autoencoder = None 
+
+    def _build_autoencoder(self):
+        # ⚠️ Architecture matches the training script
+        model = Sequential([
+            Input(shape=(self.input_dim,)),
+            Dense(256, activation='relu'),
+            BatchNormalization(),
+            Dropout(0.3),
+            Dense(128, activation='relu'),
+            Dense(32, activation='relu'),
+            Dense(128, activation='relu'),
+            Dense(256, activation='relu'),
+            Dense(self.input_dim, activation='linear')
+        ])
+        model.compile(optimizer='adam', loss='mse')
+        return model
+
+    def predict_with_explanation(self, vector_and_features):
+        if self.autoencoder is None:
+            self.autoencoder = self._build_autoencoder()
+            self.autoencoder.set_weights(self.ae_weights)
+
+        input_data = vector_and_features.reshape(1, -1)
+        input_scaled = self.scaler.transform(input_data)
+        
+        iso_pred = self.iso_model.predict(input_scaled)[0]
+        recon = self.autoencoder.predict(input_scaled, verbose=0)
+        loss = tf.keras.losses.mse(recon, input_scaled).numpy()[0]
+        
+        explanations = []
+
+        # --- 🧠 LOGIC: CUSTOM EXPLAINER FOR ANOMALY ---
+        # Features Index mapping (based on extract_structural_features):
+        # The last 7 items in the 307-dim vector are our stats.
+        stats = vector_and_features[300:] 
+        caps_ratio = stats[0]
+        digit_ratio = stats[1]
+        special_ratio = stats[2]
+        word_count = stats[6]
+
+        if iso_pred == -1:
+            msg = "Statistical Outlier detected."
+            if word_count < 10: msg += " (Text is unusually short)."
+            elif word_count > 500: msg += " (Text is unusually long)."
+            
+            explanations.append({
+                "type": "Statistical Outlier",
+                "message": msg
+            })
+            
+        if loss > self.ae_threshold:
+            reasons = []
+            if caps_ratio > 0.15: reasons.append("Too many Capital Letters")
+            if special_ratio > 0.05: reasons.append("Excessive Symbols (!@#)")
+            if digit_ratio > 0.1: reasons.append("High usage of Digits")
+            
+            reason_str = ", ".join(reasons) if reasons else "Unusual text pattern"
+            
+            explanations.append({
+                "type": "Structural Anomaly",
+                "message": f"Suspicious structure detected ({reason_str})."
+            })
+            
+        return explanations
+
+# ==========================================
+# 3. LOAD RESOURCES
+# ==========================================
 if __name__ != '__main__':
     sys.modules['__main__'] = sys.modules[__name__]
 
+# A. SPACY
 SPACY_AVAILABLE = False
 nlp_engine = None
-
 try:
     import spacy
     try:
@@ -118,46 +214,52 @@ try:
         SPACY_AVAILABLE = True
         log_debug("Spacy 'lg' loaded.", "SUCCESS")
     except:
-        try:
-            nlp_engine = spacy.load("en_core_web_md")
-            SPACY_AVAILABLE = True
-            log_debug("Spacy 'lg' missing. Loaded 'md'.", "WARN")
-        except:
-            nlp_engine = spacy.blank("en")
-            log_debug("Spacy failed. Using Blank.", "ERROR")
+        nlp_engine = spacy.blank("en")
+        log_debug("Spacy failed. Using Blank.", "ERROR")
 except ImportError:
     log_debug("Spacy Not Installed.", "ERROR")
 
-model = None
-MODEL_FILE = 'production_fake_job_pipeline.pkl'
-if os.path.exists(MODEL_FILE):
+# B. MODELS
+supervised_model = None
+anomaly_model = None
+explainer = LimeTextExplainer(class_names=['Real', 'Fake'])
+
+SUPERVISED_FILE = 'production_fake_job_pipeline.pkl'
+ANOMALY_FILE = 'robust_anomaly_model.pkl'
+
+def inject(est):
+    if isinstance(est, SpacyVectorTransformer): est.nlp = nlp_engine; return True
+    if hasattr(est, 'steps'): [inject(s[1]) for s in est.steps]
+    if hasattr(est, 'transformer_list'): [inject(s[1]) for s in est.transformer_list]
+    if hasattr(est, 'estimator'): inject(est.estimator)
+
+if os.path.exists(SUPERVISED_FILE):
     try:
-        model = joblib.load(MODEL_FILE)
-        def inject(est):
-            if isinstance(est, SpacyVectorTransformer): est.nlp = nlp_engine; return True
-            if hasattr(est, 'steps'): [inject(s[1]) for s in est.steps]
-            if hasattr(est, 'transformer_list'): [inject(s[1]) for s in est.transformer_list]
-            if hasattr(est, 'estimator'): inject(est.estimator)
-        inject(model)
-        log_debug("AI Model Loaded.", "SUCCESS")
+        supervised_model = joblib.load(SUPERVISED_FILE)
+        inject(supervised_model)
+        log_debug("Supervised Model Loaded.", "SUCCESS")
     except Exception as e:
-        log_debug(f"Model Load Failed: {str(e)}", "ERROR")
+        log_debug(f"Supervised Load Failed: {str(e)}", "ERROR")
+
+if os.path.exists(ANOMALY_FILE):
+    try:
+        anomaly_model = joblib.load(ANOMALY_FILE)
+        log_debug("Unsupervised Model Loaded.", "SUCCESS")
+    except Exception as e:
+        log_debug(f"Anomaly Load Failed: {str(e)}", "ERROR")
 
 # ==========================================
-# 3. PREDICTION LOGIC (VERBOSE LOGGING)
+# 4. PREDICTION LOGIC
 # ==========================================
 @app.route('/predict', methods=['POST'])
 def predict():
     current_user = session.get('user', '')
     is_admin = (current_user == 'Yoge')
-    
-    # Trace Logs: To be sent to UI (Specific to this request)
-    trace_logs = [] 
-    
+    trace_logs = []
+
     def trace(msg, lvl="INFO"):
-        """Adds log to both Server Console and UI Response"""
         log_debug(msg, lvl)
-        if is_admin: 
+        if is_admin:
             timestamp = datetime.now().strftime("%H:%M:%S")
             trace_logs.append(f"[{timestamp}] [{lvl}] {msg}")
 
@@ -169,181 +271,187 @@ def predict():
         text_lower = text.lower()
         if not text: return jsonify({'error': 'Empty data'}), 400
 
-        # --- CACHE CHECK ---
+        # CACHE CHECK
         text_hash = hashlib.md5(text_lower.encode('utf-8')).hexdigest()
         cached_result = cache.get(text_hash)
-        
         if cached_result:
-            trace("⚡ Cache Hit! Retrieving stored analysis...", "SUCCESS")
-            # Retrieve OLD logs from cache to show them again
-            if 'trace_logs' in cached_result and is_admin:
-                trace_logs.extend(cached_result['trace_logs'])
-                cached_result['system_logs'] = list(reversed(trace_logs)) # Update with new hit log
+            trace("⚡ Cache Hit!", "SUCCESS")
+            cached_result['system_logs'] = list(reversed(trace_logs))
             return jsonify(cached_result)
 
-        # --- IF NOT IN CACHE, START FRESH ANALYSIS ---
-        trace(f"📉 Incoming Request: {len(text)} chars", "DEBUG")
-        
+        # START ANALYSIS
+        trace(f"📉 Analyzing: {len(text)} chars", "DEBUG")
         g.spacy_doc = None
-        is_gibberish = False
         reasons = []
+        is_gibberish = False
 
-        # A. FAST SCAM CHECK (FlashText)
-        trace("🔍 Running FlashText Keyword Search...", "DEBUG")
+        # 1. HARDCODED CHECKS (FlashText & Regex)
+        trace("🔍 Running Rule-Based Checks...", "DEBUG")
         found_scam_reasons = scam_processor.extract_keywords(text)
         found_scam_reasons = list(set(found_scam_reasons))
-        
         has_scam_keywords = len(found_scam_reasons) > 0
-        if has_scam_keywords:
-            trace(f"🚨 FlashText Found Triggers: {len(found_scam_reasons)} detected", "WARN")
-        else:
-            trace("✅ FlashText: No Hardcoded Scams found.", "DEBUG")
+        
+        # Check for Green Flags (Benefits)
+        green_hits = [g for g in GREEN_FLAGS if g in text_lower]
+        has_green = len(green_hits) > 0
 
-        # B. REGEX CHECKS
+        # Check for Gibberish/Code
+        gibberish_reason = None
         if not has_scam_keywords:
-            trace("🧩 Running Regex Pattern Matching...", "DEBUG")
-            if REGEX_LONG_STRING.search(text) and "http" not in text:
+            if REGEX_CODE_SNIPPET.search(text):
                 is_gibberish = True
-                trace("🚫 Regex: Suspicious Long String detected.", "WARN")
-                reasons.append("🚫 **Input Error:** Suspicious long strings detected.")
-            
-            if REGEX_REPEATED_CHARS.search(text_lower):
+                gibberish_reason = "🚫 **Input Error:** Code snippet or SQL syntax detected."
+            elif REGEX_LONG_STRING.search(text) and "http" not in text:
                 is_gibberish = True
-                trace("🚫 Regex: Repetitive Characters detected.", "WARN")
-                reasons.append("🚫 **Gibberish:** Repetitive characters detected.")
-
-            if not is_gibberish:
-                words_raw = text_lower.split()
-                for w in words_raw:
-                    if len(w) > 10 and not REGEX_CONSONANT_SMASH.search(w) and "http" not in w:
-                        if not any(char.isdigit() for char in w): 
-                            is_gibberish = True
-                            trace(f"🚫 Regex: Consonant Smash in '{w}'", "WARN")
-                            reasons.append("🚫 **Gibberish:** Random key-mashing detected.")
-                            break
-
-        # C. SPACY CHECK
-        if not is_gibberish and not has_scam_keywords:
-            trace(f"🧠 Spacy ({nlp_engine.meta['name'] if nlp_engine else 'None'}) Analysis Started...", "DEBUG")
-            total_words = 0
-            valid_words = 0
-            if SPACY_AVAILABLE and nlp_engine:
-                doc = nlp_engine(text)
-                g.spacy_doc = doc 
-                for t in doc:
-                    if t.is_alpha or t.like_num or t.is_currency or not t.is_punct:
-                        if not t.is_space and not t.is_punct:
-                            total_words += 1
-                            if t.has_vector or t.like_num or t.is_currency:
-                                valid_words += 1
+                gibberish_reason = "🚫 **Input Error:** Suspicious long strings detected."
+            elif REGEX_REPEATED_CHARS.search(text_lower):
+                is_gibberish = True
+                gibberish_reason = "🚫 **Gibberish:** Repetitive characters detected."
             else:
-                words = REGEX_WORD_TOKEN.findall(text_lower)
-                total_words = len(words)
-                valid_words = total_words
+                words = text_lower.split()
+                if len(words) > 10 and len(set(words)) / len(words) < 0.2:
+                    is_gibberish = True
+                    gibberish_reason = "🚫 **Spam:** Excessive word repetition."
 
-            ratio = valid_words / total_words if total_words > 0 else 0
-            trace(f"📊 Spacy Stats: {valid_words}/{total_words} Valid Words (Ratio: {ratio:.2f})", "INFO")
-            
-            if total_words > 0 and total_words < 5 and ratio < 0.75:
+        # 2. SPACY PREP
+        if SPACY_AVAILABLE and nlp_engine:
+            doc = nlp_engine(text)
+            g.spacy_doc = doc
+            if len(doc) < 5:
                 is_gibberish = True
-                trace("🚫 Spacy: Text too short.", "WARN")
-                reasons.append("🚫 **Unknown Data:** Short text must be valid English.")
-            elif 5 <= total_words <= 20 and ratio < 0.4:
-                is_gibberish = True
-                trace("🚫 Spacy: Low valid word ratio (< 0.4).", "WARN")
-                reasons.append("🚫 **Gibberish:** Text contains mostly random words.")
-            elif total_words > 20 and ratio < 0.15: 
-                is_gibberish = True
-                trace("🚫 Spacy: Very low valid word ratio (< 0.15).", "WARN")
-                reasons.append("🚫 **Gibberish:** Text structure is incoherent.")
+                gibberish_reason = "🚫 **Input Error:** Text too short to analyze."
 
-        # D. PREDICTION
-        result = {}
-        if is_gibberish:
-            trace("❌ Verdict: Gibberish Detected.", "ERROR")
-            result = {'fraud_probability': 100.0, 'reasons': reasons, 'is_gibberish': True}
-        elif model:
-            # 1. Base AI Prediction
-            trace("🤖 Invoking Scikit-Learn Pipeline...", "DEBUG")
-            proba = model.predict_proba([text])[0]
-            fake_prob = proba[1]
-            trace(f"🔢 Base Model Probability: {fake_prob:.4f}", "INFO")
+        # 3. SUPERVISED PREDICTION (SMART LOGIC) 🧠
+        fake_prob = 0.0
+        if supervised_model:
+            trace("🤖 Running Supervised Model (Smart Logic)...", "DEBUG")
+            base_prob = supervised_model.predict_proba([text])[0][1]
+            trace(f"   -> Base Score: {base_prob:.4f}", "DEBUG")
             
-            human_reasons = []
-            override_active = False
-
-            # 2. CRITICAL TRIGGERS (FlashText)
-            if has_scam_keywords:
-                fake_prob = 0.99
-                human_reasons.extend(found_scam_reasons)
-                override_active = True
-                trace("🔒 Hardcoded Override Active: Score set to 99%", "WARN")
-
-            # 3. Soft Triggers & LIME
-            if not override_active:
-                if "@gmail.com" in text_lower or "@yahoo.com" in text_lower:
-                    fake_prob += 0.30 
-                    trace("⚠️ Trigger: Personal Email Domain found.", "WARN")
-                    human_reasons.append("⚠️ **Suspicious:** Using personal email for corporate role.")
-                if "urgent" in text_lower or "immediate" in text_lower:
-                    fake_prob += 0.10
-                    trace("⚠️ Trigger: Urgency keywords found.", "WARN")
-                    human_reasons.append("⚠️ **Urgency:** Scammers often create fake urgency.")
-
-                try:
-                    trace("🍋 Running LIME Explainer (Samples=500)...", "DEBUG")
-                    exp = explainer.explain_instance(text, model.predict_proba, num_features=5, num_samples=500)
-                    lime_list = exp.as_list()
-                    
-                    suspicious_words = [w for w, s in lime_list if s > 0.05]
-                    safe_words = [w for w, s in lime_list if s < -0.05]
-                    
-                    trace(f"🔍 LIME Suspicious: {suspicious_words}", "DEBUG")
-                    trace(f"🛡️ LIME Safe: {safe_words}", "DEBUG")
-
-                    if suspicious_words and fake_prob > 0.5:
-                        human_reasons.append(f"🔍 **AI Insight:** High risk words found: '{', '.join(suspicious_words)}'")
-                except Exception as lime_e:
-                    trace(f"LIME Error: {str(lime_e)}", "ERROR")
-
-            fake_prob = min(max(fake_prob, 0.0), 1.0)
-
-            if fake_prob > 0.8:
-                if not human_reasons: human_reasons.append("🤖 **AI Verdict:** Highly suspicious pattern detected.")
-            elif fake_prob > 0.5:
-                if not human_reasons: human_reasons.append("🤖 **AI Verdict:** Text resembles known scam templates.")
-            else:
-                if not human_reasons: human_reasons.append("✅ **System Clean:** No known threats detected.")
-
-            trace(f"🏆 Final Calculated Risk Score: {fake_prob:.4f}", "SUCCESS")
-            result = {'fraud_probability': round(fake_prob * 100, 2), 'reasons': human_reasons, 'is_gibberish': False}
+            # Sliding Window (For long text)
+            max_window_prob = 0.0
+            sentences = re.split(r'(?<=[.!?]) +', text)
+            if len(sentences) >= 3:
+                windows = [" ".join(sentences[i:i+3]) for i in range(len(sentences)-2)]
+                if windows:
+                    window_probs = supervised_model.predict_proba(windows)[:, 1]
+                    max_window_prob = np.max(window_probs)
+                    trace(f"   -> Sliding Window Max: {max_window_prob:.4f}", "DEBUG")
             
-            # --- SAVE TO CACHE (INCLUDE LOGS) ---
-            # We save the trace_logs INSIDE the cache value so they can be replayed
-            result['trace_logs'] = trace_logs 
-            cache.set(text_hash, result)
-            trace("💾 Result & Logs saved to Cache.", "DEBUG")
-
+            fake_prob = max(base_prob, max_window_prob)
         else:
-            result = {'fraud_probability': 0, 'reasons': ["Mock Mode"], 'is_gibberish': False}
+            trace("❌ Supervised Model Missing", "ERROR")
 
-        # Send logs to UI
+        # 4. UNSUPERVISED ANOMALY CHECK 🦄
+        anomaly_warnings = []
+        if anomaly_model:
+            trace("🦄 Running Anomaly Detector...", "DEBUG")
+            try:
+                if hasattr(g, 'spacy_doc') and g.spacy_doc:
+                    vec = g.spacy_doc.vector
+                else:
+                    vec = nlp_engine(text).vector
+                
+                stats = extract_structural_features(text)
+                final_features = np.hstack((vec, np.array(stats)))
+                
+                anomaly_warnings = anomaly_model.predict_with_explanation(final_features)
+                if anomaly_warnings:
+                    trace(f"   -> {len(anomaly_warnings)} Anomalies Found!", "WARN")
+            except Exception as ae:
+                trace(f"Anomaly Error: {str(ae)}", "ERROR")
+
+        # 5. MERGE & CALCULATE FINAL VERDICT ⚖️
+        human_reasons = []
+        override_active = False
+
+        # --- 🔧 ANOMALY BOOST LOGIC ---
+        if anomaly_warnings:
+            # Boost score to Critical (85%)
+            fake_prob = max(fake_prob, 0.85)
+            # Add specific explanations to UI
+            for warn in anomaly_warnings:
+                human_reasons.append(f"⚠️ **Anomaly:** {warn['message']}")
+            trace(f"🚀 Anomaly Boost Applied! Score bumped to {fake_prob:.2f}", "WARN")
+
+        # A. Critical Triggers
+        if has_scam_keywords:
+            fake_prob = 0.99
+            human_reasons.extend(found_scam_reasons)
+            override_active = True
+            trace("🔒 Critical Trigger: Override to 99%", "WARN")
+
+        # B. Gibberish
+        if is_gibberish and gibberish_reason:
+            fake_prob = max(fake_prob, 0.95)
+            human_reasons.append(gibberish_reason)
+
+        # C. Green Flags
+        if has_green and not override_active and not is_gibberish and not anomaly_warnings:
+            original_prob = fake_prob
+            fake_prob = min(fake_prob, 0.30)
+            if original_prob > 0.5:
+                trace(f"🛡️ Benefits found. Reduced score from {original_prob:.2f}", "SUCCESS")
+                human_reasons.append("✅ **Legitimacy Boost:** Verified corporate benefits found.")
+
+        # D. LIME & Soft Triggers
+        if not override_active and not is_gibberish:
+            if "@gmail.com" in text_lower or "@yahoo.com" in text_lower:
+                fake_prob += 0.20
+                human_reasons.append("⚠️ **Suspicious:** Personal email domain.")
+            
+            # --- 🔧 FIX: ALWAYS RUN LIME IF > 10% ---
+            if fake_prob > 0.10:
+                try:
+                    trace("🍋 Running LIME...", "DEBUG")
+                    exp = explainer.explain_instance(text, supervised_model.predict_proba, num_features=5, num_samples=50)
+                    lime_list = exp.as_list()
+                    suspicious_words = [w for w, s in lime_list if s > 0.05]
+                    if suspicious_words:
+                        human_reasons.append(f"🔍 **AI Insight:** Risky words: '{', '.join(suspicious_words)}'")
+                except: pass
+
+        # 6. FINAL SCORING
+        fake_prob = min(max(fake_prob, 0.0), 1.0)
+        
+        if fake_prob > 0.8:
+            if not human_reasons: human_reasons.append("🤖 **AI Verdict:** Highly suspicious pattern.")
+        elif fake_prob > 0.5:
+            if not human_reasons: human_reasons.append("🤖 **AI Verdict:** Text resembles known scam templates.")
+        else:
+            if not human_reasons and not anomaly_warnings: 
+                human_reasons.append("✅ **System Clean:** No threats found.")
+
+        trace(f"🏆 Final Score: {fake_prob:.4f}", "SUCCESS")
+
+        result = {
+            'fraud_probability': round(fake_prob * 100, 2), 
+            'reasons': human_reasons, 
+            'is_gibberish': is_gibberish,
+            'anomaly_analysis': {
+                'detected': len(anomaly_warnings) > 0,
+                'warnings': anomaly_warnings
+            }
+        }
+
+        # Cache & Return
+        result['trace_logs'] = trace_logs
+        cache.set(text_hash, result)
         result['system_logs'] = list(reversed(trace_logs)) if is_admin else None
+        
         return jsonify(result)
 
     except Exception as e:
-        error_msg = f"Internal Error: {str(e)}"
-        log_debug(error_msg, "ERROR")
-        return jsonify({'error': error_msg}), 500
+        log_debug(f"Internal Error: {str(e)}", "ERROR")
+        return jsonify({'error': str(e)}), 500
 
 # ==========================================
-# 4. AUTH & DB (UNCHANGED)
+# 5. AUTH & DB ROUTING
 # ==========================================
 def init_db():
     with sqlite3.connect(DB_NAME) as conn:
-        conn.cursor().execute('''CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL,
-            email TEXT UNIQUE NOT NULL, password TEXT NOT NULL)''')
+        conn.cursor().execute('''CREATE TABLE IF NOT EXISTS users 
+            (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL, email TEXT UNIQUE NOT NULL, password TEXT NOT NULL)''')
 if not os.path.exists(DB_NAME): init_db()
 
 @app.after_request
@@ -359,9 +467,9 @@ def api_signup():
         with sqlite3.connect(DB_NAME) as conn:
             conn.cursor().execute("INSERT INTO users (username, email, password) VALUES (?, ?, ?)", 
                                 (data.get('username'), data.get('email'), hashed))
-        session['user'] = data.get('username')
-        session.permanent = True
-        return jsonify({'success': True, 'username': data.get('username')})
+            session['user'] = data.get('username')
+            session.permanent = True
+            return jsonify({'success': True, 'username': data.get('username')})
     except: return jsonify({'error': 'User exists'}), 409
 
 @app.route('/api/login', methods=['POST'])
@@ -369,11 +477,10 @@ def api_login():
     data = request.get_json()
     with sqlite3.connect(DB_NAME) as conn:
         row = conn.cursor().execute("SELECT password FROM users WHERE username = ?", (data.get('username'),)).fetchone()
-    if row and check_password_hash(row[0], data.get('password')):
-        session['user'] = data.get('username')
-        if data.get('remember'): session.permanent = True
-        else: session.permanent = False
-        return jsonify({'success': True, 'username': data.get('username')})
+        if row and check_password_hash(row[0], data.get('password')):
+            session['user'] = data.get('username')
+            session.permanent = True if data.get('remember') else False
+            return jsonify({'success': True, 'username': data.get('username')})
     return jsonify({'error': 'Invalid credentials'}), 401
 
 @app.route('/api/logout', methods=['POST'])
