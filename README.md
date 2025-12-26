@@ -3,17 +3,18 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) [![Python](https://img.shields.io/badge/Python-3.12.12-blue)](https://www.python.org/) [![Framework](https://img.shields.io/badge/Backend-Flask-red)](https://flask.palletsprojects.com/) [![ML](https://img.shields.io/badge/sklearn-1.6.1-orange)]() [![TensorFlow](https://img.shields.io/badge/TensorFlow-2.19-orange)]()
 
 ## 📋 Table of Contents
-1. [📌 Overview](#-overview)
-2. [✨ Key Features (Application)](#-key-features-application)
-3. [🛠️ Tech Stack & Compatibility](#-tech-stack--compatibility)
-4. [🔬 Deep Dive: Model Architecture](#-deep-dive-model-architecture)
-5. [📂 Project Structure](#-project-structure)
-6. [⚙️ Installation & Setup](#-installation--setup)
-7. [👤 Author](#-author)
-8. [📜 License](#-license)
+1. [📌 Overview](#overview)
+2. [✨ Key Features (Application)](#key-features)
+3. [🛠️ Tech Stack & Compatibility](#tech-stack)
+4. [🔬 Deep Dive: Model Architecture](#model-architecture)
+5. [📂 Project Structure](#project-structure)
+6. [⚙️ Installation & Setup](#installation)
+7. [👤 Author](#author)
+8. [📜 License](#license)
 
 ---
 
+<a id='overview'></a>
 ## 📌 Overview
 This project is a sophisticated **Web-based AI Deception Detector** designed to identify fake job postings and recruitment scams. Unlike static spam filters, this system employs a **Dual-Core Hybrid Intelligence Engine**.
 
@@ -26,6 +27,7 @@ The application offers a secure, user-friendly dashboard where candidates can pa
 
 ---
 
+<a id='key-features'></a>
 ## ✨ Key Features (Application)
 
 ### 🛡️ Core Security & Detection
@@ -44,6 +46,7 @@ The application offers a secure, user-friendly dashboard where candidates can pa
 
 ---
 
+<a id='tech-stack'></a>
 ## 🛠️ Tech Stack & Compatibility
 
 **Core Environment:**
@@ -62,6 +65,7 @@ The application offers a secure, user-friendly dashboard where candidates can pa
 
 ---
 
+<a id='model-architecture'></a>
 ## 🔬 Deep Dive: Model Architecture
 This system uses a novel **Dual-Pipeline Approach**, running two independent AI models in parallel to ensure 360° protection.
 
@@ -96,6 +100,7 @@ This system uses a novel **Dual-Pipeline Approach**, running two independent AI 
 
 ---
 
+<a id='project-structure'></a>
 ## 📂 Project Structure
 ```bash
 Fake_Job_Detection_Python/
@@ -126,6 +131,7 @@ Fake_Job_Detection_Python/
 
 ---
 
+<a id='installation'></a>
 ## ⚙️ Installation & Setup
 
 **⚠️ Critical Note:** Ensure you have **TensorFlow 2.19** installed alongside standard ML libraries.
@@ -154,6 +160,7 @@ Visit `http://127.0.0.1:5000` in your browser.
 
 ---
 
+<a id='author'></a>
 ## 👤 Author
 
 **Yogeshwaran**
@@ -162,6 +169,7 @@ Visit `http://127.0.0.1:5000` in your browser.
 
 ---
 
+<a id='license'></a>
 ## 📜 License
 
 Distributed under the MIT License. See `LICENSE` for more information.
