@@ -60,7 +60,11 @@ scam_terms = {
     "cashier check": "💸 **FRAUD:** 'Cashier Check' is a common banking scam.",
     "no human resources": "⚠️ **Suspicious:** 'No HR screening' is highly unusual.",
     "no interview": "⚠️ **Suspicious:** Skipping interview process is a scam tactic.",
-    "encrypted credential": "⚠️ **Suspicious:** Asking for credentials via chat is unsafe."
+    "encrypted credential": "⚠️ **Suspicious:** Asking for credentials via chat is unsafe.",
+        # Add these to your scam_terms dictionary inside app.py
+    "update my profile": "🚨 **PHISHING:** Asking to click links to 'update profile' is a common data theft tactic.",
+    "update your profile": "🚨 **PHISHING:** Asking to click links to 'update profile' is a common data theft tactic.",
+    "click the link below": "⚠️ **Suspicious:** Instructing to click links often indicates phishing."
 }
 for term, reason in scam_terms.items():
     scam_processor.add_keyword(term, reason)
