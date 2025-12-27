@@ -1,7 +1,7 @@
 document.addEventListener('DOMContentLoaded', () => {
     
     // ==========================================
-    // 1. MATRIX RAIN (RESPONSIVE FIX)
+    // 1. MATRIX RAIN (RESPONSIVE)
     // ==========================================
     const canvas = document.getElementById('matrixCanvas');
     const ctx = canvas.getContext('2d');
@@ -16,9 +16,7 @@ document.addEventListener('DOMContentLoaded', () => {
         canvas.height = window.innerHeight;
         columns = Math.floor(canvas.width / fontSize);
         drops = [];
-        for(let x = 0; x < columns; x++) {
-            drops[x] = Math.floor(Math.random() * -100); 
-        }
+        for(let x = 0; x < columns; x++) drops[x] = Math.floor(Math.random() * -100); 
     }
 
     const draw = () => {
@@ -31,17 +29,14 @@ document.addEventListener('DOMContentLoaded', () => {
             const text = alphabet.charAt(Math.floor(Math.random() * alphabet.length));
             ctx.fillStyle = Math.random() > 0.9 ? '#00f3ff' : '#00ff9d';
             ctx.fillText(text, i * fontSize, drops[i] * fontSize);
-
-            if(drops[i] * fontSize > canvas.height && Math.random() > 0.975) {
-                drops[i] = 0;
-            }
+            if(drops[i] * fontSize > canvas.height && Math.random() > 0.975) drops[i] = 0;
             drops[i]++;
         }
     };
 
     initMatrix();
     setInterval(draw, 33);
-    window.addEventListener('resize', initMatrix); // ⚡ FIX: Recalculate on rotation
+    window.addEventListener('resize', initMatrix);
 
     // ==========================================
     // 2. UI TOGGLES
@@ -50,45 +45,31 @@ document.addEventListener('DOMContentLoaded', () => {
     const signupBox = document.querySelector('.signup-box');
     
     document.getElementById('showSignup').addEventListener('click', (e) => {
-        e.preventDefault();
-        loginBox.classList.add('hidden');
-        signupBox.classList.remove('hidden');
+        e.preventDefault(); loginBox.classList.add('hidden'); signupBox.classList.remove('hidden');
     });
 
     document.getElementById('showLogin').addEventListener('click', (e) => {
-        e.preventDefault();
-        signupBox.classList.add('hidden');
-        loginBox.classList.remove('hidden');
+        e.preventDefault(); signupBox.classList.add('hidden'); loginBox.classList.remove('hidden');
     });
 
     document.querySelectorAll('.password-toggle').forEach(button => {
         button.addEventListener('click', function() {
             const input = this.parentElement.querySelector('.password-field');
             const icon = this.querySelector('i');
-            if (input.type === 'password') {
-                input.type = 'text';
-                icon.classList.remove('fa-eye');
-                icon.classList.add('fa-eye-slash');
-            } else {
-                input.type = 'password';
-                icon.classList.remove('fa-eye-slash');
-                icon.classList.add('fa-eye');
-            }
+            if (input.type === 'password') { input.type = 'text'; icon.classList.replace('fa-eye', 'fa-eye-slash'); }
+            else { input.type = 'password'; icon.classList.replace('fa-eye-slash', 'fa-eye'); }
         });
     });
 
     // ==========================================
-    // 3. LOGIN LOGIC (UX ENHANCED)
+    // 3. LOGIN LOGIC (SMART VISUALS)
     // ==========================================
     const loginForm = document.getElementById('loginForm');
     const loginUser = document.getElementById('loginUser');
     const loginPass = document.getElementById('loginPass');
-    
-    // Helper to find the button inside the form
     const loginBtn = loginForm.querySelector('button[type="submit"]');
     const btnText = loginBtn.querySelector('.btn-text');
 
-    // FUNCTION: Reset Button to Initial State
     function resetLoginState() {
         if (loginBtn.disabled || loginBtn.style.borderColor === "var(--neon-pink)") {
             loginBtn.disabled = false;
@@ -101,7 +82,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // LISTENER: Reset state when user modifies text (⚡ FIX for UX)
     loginUser.addEventListener('input', resetLoginState);
     loginPass.addEventListener('input', resetLoginState);
 
@@ -109,9 +89,7 @@ document.addEventListener('DOMContentLoaded', () => {
         e.preventDefault();
         const user = loginUser.value;
         const pass = loginPass.value;
-        
-        const rememberBox = document.getElementById('rememberCheck');
-        const remember = rememberBox ? rememberBox.checked : false;
+        const remember = document.getElementById('rememberCheck').checked;
 
         btnText.innerText = "AUTHENTICATING...";
         loginBtn.style.background = "rgba(0, 243, 255, 0.1)";
@@ -122,33 +100,23 @@ document.addEventListener('DOMContentLoaded', () => {
         fetch('/api/login', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-                username: user, 
-                password: pass,
-                remember: remember 
-            })
+            body: JSON.stringify({ username: user, password: pass, remember: remember })
         })
         .then(res => res.json())
         .then(data => {
             if(data.success) {
-                // ⚡ FIX: Save username for Dashboard self-healing
                 localStorage.setItem('jobGuardUser', data.username);
-                
                 loginBtn.style.borderColor = "var(--neon-green)";
                 loginBtn.style.color = "var(--neon-green)";
                 btnText.innerText = "ACCESS GRANTED";
-                setTimeout(() => {
-                    window.location.href = '/dashboard';
-                }, 500);
+                setTimeout(() => window.location.href = '/dashboard', 500);
             } else {
-                // ⚡ FIX: Visual Error State (No Alert)
                 btnText.innerText = "ACCESS DENIED";
                 loginBtn.style.background = "var(--neon-pink)";
                 loginBtn.style.borderColor = "var(--neon-pink)";
                 loginBtn.style.color = "#fff";
                 loginBtn.style.boxShadow = "0 0 15px var(--neon-pink)";
                 loginBtn.style.cursor = "not-allowed";
-                // Button stays disabled until user types again
             }
         })
         .catch(err => {
@@ -161,19 +129,27 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // ==========================================
-    // 4. SIGNUP LOGIC
+    // 4. SIGNUP LOGIC (WITH STATE CLASSES)
     // ==========================================
-    document.getElementById('signupForm').addEventListener('submit', (e) => {
+    const signupForm = document.getElementById('signupForm');
+    const regBtn = document.getElementById('regBtn');
+    const regBtnText = regBtn.querySelector('.btn-text');
+
+    function clearButtonStates() {
+        regBtn.classList.remove('btn-loading', 'btn-error', 'btn-success');
+    }
+
+    signupForm.addEventListener('submit', (e) => {
         e.preventDefault();
         const user = document.getElementById('signupUser').value;
         const email = document.getElementById('signupEmail').value;
         const pass = document.getElementById('signupPass').value;
-        const btn = e.target.querySelector('button[type="submit"]');
 
-        btn.innerText = "REGISTERING...";
-        btn.style.background = "var(--neon-pink)";
-        btn.style.color = "#fff";
-        btn.disabled = true;
+        // 1. Loading
+        clearButtonStates();
+        regBtn.classList.add('btn-loading');
+        regBtnText.innerText = "REGISTERING...";
+        regBtn.disabled = true;
 
         fetch('/api/signup', {
             method: 'POST',
@@ -183,20 +159,26 @@ document.addEventListener('DOMContentLoaded', () => {
         .then(res => res.json())
         .then(data => {
             if(data.success) {
-                alert("REGISTRATION SUCCESSFUL. LOGGING IN...");
+                // 2. Success
+                clearButtonStates();
+                regBtn.classList.add('btn-success');
+                regBtnText.innerText = "UNIT INTEGRATED";
                 localStorage.setItem('jobGuardUser', user);
-                window.location.href = '/dashboard';
+                setTimeout(() => window.location.href = '/dashboard', 800);
             } else {
-                alert("REGISTRATION FAILED: " + data.error);
-                btn.innerText = "REGISTER UNIT";
-                btn.style.background = "";
-                btn.disabled = false;
+                // 3. Error
+                clearButtonStates();
+                regBtn.classList.add('btn-error');
+                regBtnText.innerText = "USER EXISTS";
             }
         })
         .catch(err => {
             console.error(err);
-            alert("SERVER ERROR: Registration node offline.");
-            btn.disabled = false;
+            clearButtonStates();
+            regBtnText.innerText = "SYSTEM OFFLINE";
+            regBtn.style.borderColor = "#ffaa00";
+            regBtn.style.color = "#ffaa00";
+            regBtn.disabled = false;
         });
     });
 
@@ -206,7 +188,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const sUser = document.getElementById('signupUser');
     const sEmail = document.getElementById('signupEmail');
     const sPass = document.getElementById('signupPass');
-    const regBtn = document.getElementById('regBtn');
 
     const patterns = {
         user: /^[a-zA-Z0-9_]{3,15}$/,
@@ -215,6 +196,12 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     function validateField(field, regex, msgElement, errorMsg) {
+        // RESET ERROR STATE ON TYPING
+        if(regBtn.classList.contains('btn-error')) {
+            clearButtonStates();
+            regBtnText.innerText = "REGISTER UNIT";
+        }
+
         if (regex.test(field.value)) {
             field.parentElement.classList.add('valid');
             field.parentElement.classList.remove('invalid');
@@ -234,12 +221,17 @@ document.addEventListener('DOMContentLoaded', () => {
         if (patterns.user.test(sUser.value) && 
             patterns.email.test(sEmail.value) && 
             patterns.pass.test(sPass.value)) {
-            regBtn.removeAttribute('disabled');
+            regBtn.disabled = false;
             regBtn.style.cursor = "pointer";
+            regBtn.style.borderColor = "var(--neon-cyan)";
+            regBtn.style.color = "var(--neon-cyan)";
         } else {
-            regBtn.setAttribute('disabled', 'true');
+            regBtn.disabled = true;
             regBtn.style.cursor = "not-allowed";
         }
+
+        regBtn.style.borderColor = "";
+        regBtn.style.color = "";
     }
 
     if(sUser && sEmail && sPass) {
