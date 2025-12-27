@@ -13,7 +13,7 @@
 body {
     background-color: var(--bg-dark);
     font-family: var(--font-ui);
-    /* ⚡ FIX: min-height allows scrolling on small screens/landscape */
+    /* ⚡ FIX: min-height allows growing on small screens */
     min-height: 100vh;
     display: flex;
     justify-content: center;
@@ -22,13 +22,12 @@ body {
     overflow-y: auto;
     overflow-x: hidden;
     color: #fff;
-    /* Add padding so content doesn't touch edges on mobile */
     padding: 40px 20px;
 }
 
 /* --- BACKGROUND --- */
 #matrixCanvas {
-    /* ⚡ FIX: Fixed position keeps rain background static while content scrolls */
+    /* ⚡ FIX: Fixed position keeps rain static while content scrolls */
     position: fixed; 
     top: 0; left: 0; width: 100%; height: 100%;
     z-index: -1; opacity: 0.3;
@@ -83,7 +82,7 @@ body {
     position: absolute;
     left: 0;
     top: 0;
-    height: 45px; /* Matches input height */
+    height: 45px;
     width: 45px;
     display: flex;
     justify-content: center;
@@ -112,27 +111,16 @@ body {
     box-shadow: 0 0 10px rgba(0, 243, 255, 0.2);
 }
 
-/* Password Toggle Eye */
 .password-toggle {
     position: absolute;
-    right: 0;
-    top: 0;
-    height: 45px;
-    width: 40px;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    background: none; 
-    border: none; 
-    color: #666; 
-    cursor: pointer;
+    right: 0; top: 0; height: 45px; width: 40px;
+    display: flex; justify-content: center; align-items: center;
+    background: none; border: none; color: #666; cursor: pointer;
 }
 .password-toggle:hover { color: #fff; }
 
-/* --- CHECKBOX (Custom) --- */
-.options {
-    text-align: left; margin-bottom: 20px;
-}
+/* --- CHECKBOX --- */
+.options { text-align: left; margin-bottom: 20px; }
 .checkbox-container {
     display: block; position: relative; padding-left: 30px;
     cursor: pointer; font-size: 0.8rem; color: #aaa;
@@ -177,19 +165,37 @@ body {
 }
 .cyber-btn:disabled {
     cursor: not-allowed;
-    /* Style is controlled via JS for specific error states */
+    border-color: #444; color: #666; background: transparent; box-shadow: none;
 }
 
-/* --- SWITCH MODE LINK --- */
-.switch-mode {
-    margin-top: 20px; font-size: 0.9rem; color: #888;
+/* --- BUTTON STATE OVERRIDES (Important for Signup Visuals) --- */
+.cyber-btn.btn-loading {
+    border-color: var(--neon-pink) !important;
+    color: var(--neon-pink) !important;
+    background: rgba(255, 0, 85, 0.1) !important;
+    cursor: wait !important;
+    box-shadow: none !important;
 }
-.switch-mode a {
-    color: var(--neon-cyan); text-decoration: none; font-weight: 700; margin-left: 5px;
+.cyber-btn.btn-error {
+    border-color: var(--neon-pink) !important;
+    background: var(--neon-pink) !important;
+    color: #fff !important;
+    box-shadow: 0 0 15px var(--neon-pink) !important;
+    cursor: not-allowed !important;
 }
+.cyber-btn.btn-success {
+    border-color: var(--neon-green) !important;
+    color: var(--neon-green) !important;
+    background: rgba(0, 255, 157, 0.1) !important;
+    cursor: default !important;
+    box-shadow: 0 0 15px var(--neon-green) !important;
+}
+
+/* --- EXTRAS --- */
+.switch-mode { margin-top: 20px; font-size: 0.9rem; color: #888; }
+.switch-mode a { color: var(--neon-cyan); text-decoration: none; font-weight: 700; margin-left: 5px; }
 .switch-mode a:hover { text-decoration: underline; text-shadow: 0 0 8px var(--neon-cyan); }
 
-/* --- VALIDATION MESSAGES --- */
 .validation-msg {
     display: block; font-size: 0.7rem; font-family: var(--font-code);
     text-align: right; margin-top: 5px; min-height: 15px;
