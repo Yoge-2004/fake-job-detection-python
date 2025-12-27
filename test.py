@@ -8,7 +8,7 @@ from lime.lime_text import LimeTextExplainer
 
 # --- CONFIGURATION ---
 MODEL_FILE_PATH = 'production_fake_job_pipeline.pkl'
-SPACY_MODEL_NAME = 'en_core_web_md'
+SPACY_MODEL_NAME = 'en_core_web_lg'
 
 
 # ---------------------
