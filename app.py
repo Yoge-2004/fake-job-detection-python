@@ -288,8 +288,15 @@ def predict():
         if bert_score > 0.90:
             final_prob = max(final_prob, bert_score)
 
+        # 🛡️ ANOMALY OVERRIDE (Critical Fix)
         if anomaly_alerts:
-            final_prob = min(final_prob + 0.15, 0.99)
+            # If structure is broken, BERT's opinion on "meaning" is invalid.
+            # We treat structural failure as a high-probability fraud indicator.
+            # Force the score to be at least 55% (Fake) or add a massive penalty (+40%)
+            original_score = final_prob
+            final_prob = max(final_prob + 0.40, 0.55) 
+            final_prob = min(final_prob, 0.99) # Cap at 99%
+            trace(f"Anomaly Critical Override: {original_score:.2f} -> {final_prob:.2f}", "WARN")
             
         trace(f"Ensemble Result: {final_prob:.4f}", "RESULT")
 
