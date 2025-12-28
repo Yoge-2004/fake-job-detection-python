@@ -111,6 +111,7 @@ Fake_Job_Detection_Python/
 ├── config.json                       # BERT Architecture Config
 ├── model.safetensors                 # BERT Weights (The Brain - ~260MB)
 ├── tokenizer.json                    # BERT Tokenizer Data
+├── tokenizer_config.json             # BERT Tokenizer Settings (CRITICAL)
 ├── vocab.txt                         # BERT Vocabulary List
 ├── special_tokens_map.json           # BERT Special Token Rules
 │
