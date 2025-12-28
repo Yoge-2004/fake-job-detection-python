@@ -385,6 +385,26 @@ def api_login():
 @app.route('/api/logout', methods=['POST'])
 def api_logout(): session.clear(); return jsonify({'success': True})
 
+@app.route('/api/delete_account', methods=['POST'])
+def delete_account():
+    if 'user' not in session: 
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    try:
+        username = session['user']
+        with sqlite3.connect(DB_NAME) as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM users WHERE username = ?", (username,))
+            conn.commit()
+            
+        session.clear()
+        log_debug(f"⚠️ Account Deleted: {username}", "WARN")
+        return jsonify({'success': True})
+        
+    except Exception as e:
+        log_debug(f"Delete Failed: {e}", "ERROR")
+        return jsonify({'error': str(e)}), 500
+        
 @app.route('/api/user_info')
 def user_info(): return jsonify({'username': session.get('user')})
 
