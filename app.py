@@ -1,5 +1,6 @@
 import warnings
 from datetime import datetime
+import traceback
 
 # ==========================================
 # 0. CRADLE LOGGING (FIRST)
@@ -14,7 +15,7 @@ def log_debug(message, level="INFO"):
     print(entry, flush=True)
 
 def custom_warning_handler(message, category, filename, lineno, file=None, line=None):
-    log_debug(f"OS_WARNING: {message} ({category.__name__})", "WARN")
+    pass 
 
 warnings.showwarning = custom_warning_handler
 
@@ -29,25 +30,25 @@ import joblib, os, re, numpy as np, sqlite3, sys, hashlib, math
 from datetime import timedelta
 from werkzeug.security import generate_password_hash, check_password_hash
 from lime.lime_text import LimeTextExplainer
-from flashtext import KeywordProcessor
 
-# 🔧 MONKEY PATCH for NumPy (Fixes FutureWarning/AttributeError)
-if not hasattr(np, 'object'):
-    np.object = object
-if not hasattr(np, 'bool'):
-    np.bool = bool
-if not hasattr(np, 'int'):
-    np.int = int
-
+# BERT & DEEP LEARNING IMPORTS
+import torch
+import torch.nn.functional as F
+from transformers import DistilBertTokenizerFast, DistilBertForSequenceClassification
 import tensorflow as tf
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Input, Dense, Dropout, BatchNormalization
 import __main__
 
+# 🔧 MONKEY PATCH for NumPy compatibility
+if not hasattr(np, 'object'): np.object = object
+if not hasattr(np, 'bool'): np.bool = bool
+if not hasattr(np, 'int'): np.int = int
+
 log_debug("--- SYSTEM BOOT SEQUENCE INITIATED ---", "STARTUP")
 
 # ==========================================
-# 2. CLASS DEFINITIONS
+# 2. CLASS DEFINITIONS (REQUIRED FOR OLD PIPELINE)
 # ==========================================
 class TextCleaner(BaseEstimator, TransformerMixin):
     def fit(self, X, y=None): return self
@@ -55,10 +56,8 @@ class TextCleaner(BaseEstimator, TransformerMixin):
         cleaned = []
         for text in X:
             text = str(text).lower() if text else ""
-            text = re.sub(r'http\S+|www\.\S+', 'token_url', text)
-            text = re.sub(r'\S+@\S+', 'token_email', text)
-            text = re.sub(r'[^a-z0-9\s\$\%\@\.\,\!]', '', text)
-            cleaned.append(re.sub(r'\s+', ' ', text).strip())
+            text = re.sub(r'\s+', ' ', text).strip()
+            cleaned.append(text)
         return cleaned
 
 class SpacyVectorTransformer(BaseEstimator, TransformerMixin):
@@ -106,9 +105,46 @@ __main__.SpacyVectorTransformer = SpacyVectorTransformer
 __main__.RobustAnomalyDetector = RobustAnomalyDetector
 
 # ==========================================
-# 3. LOGIC ENGINES (PHISHING + MONEY MULE + URGENCY)
+# 3. HEURISTIC ENGINE (The Safety Net)
 # ==========================================
-GREEN_FLAGS = ["401k", "health insurance", "pto", "dental", "vision", "on-site", "equal opportunity", "veteran status", "disability"]
+def heuristic_analysis(text):
+    text_lower = text.lower(); warnings = []
+    
+    # Behavioral Patterns
+    behavioral_patterns = [
+        (r"(validate|verify).{0,20}(bank|account|wallet)", "🎣 **Phishing:** Request to validate financial info."),
+        (r"(click|follow).{0,20}(link|url).{0,20}(verify|update)", "🎣 **Phishing:** 'Click link to verify' pattern."),
+        (r"(processing|training).{0,10}(fee|charge|cost)", "💸 **Financial:** Illegal demand for fees."),
+        (r"(no).{0,10}(interview).{0,20}(direct)", "⚠️ **Red Flag:** Direct hire / No interview.")
+    ]
+    for pattern, msg in behavioral_patterns:
+        if re.search(pattern, text_lower): warnings.append(msg)
+
+    # Keywords
+    triggers = {
+        "telegram": "🚨 **Platform:** Telegram contact.",
+        "signal": "🚨 **Platform:** Signal (Encrypted) contact.",
+        "whatsapp": "🚨 **Platform:** WhatsApp contact.",
+        "usdt": "🚨 **Crypto:** USDT payment mentioned.",
+        "bitcoin": "🚨 **Crypto:** Bitcoin payment mentioned.",
+        "anydesk": "⚠️ **Security:** Remote Access Tool (AnyDesk)."
+    }
+    for word, msg in triggers.items():
+        if word in text_lower: warnings.append(msg)
+        
+    return warnings
+
+# 🟢 THIS WAS MISSING - NOW ADDED BACK
+def metadata_check(text):
+    advisory = []
+    text_low = text.lower()
+    if "@gmail.com" in text_low or "@yahoo.com" in text_low: 
+        advisory.append("ℹ️ **Identity:** Personal email domain used.")
+    if "salary" not in text_low and "$" not in text and "lpa" not in text_low: 
+        advisory.append("ℹ️ **Clarity:** Missing salary details.")
+    if "linkedin" not in text_low and "company" not in text_low: 
+        advisory.append("ℹ️ **Verification:** No company/social links.")
+    return advisory
 
 def extract_structural_features(text):
     text = str(text); length = max(len(text), 1)
@@ -118,130 +154,84 @@ def extract_structural_features(text):
     word_count = len(text.split())
     return [caps/length, digits/length, specials/length, 1 if "@" in text else 0, 0, 1 if "http" in text else 0, word_count]
 
-def human_reasoning_engine(text):
-    text_lower = text.lower(); reasons = []
-    
-    # 1. Logic Gaps
-    if ("usa" in text_lower or "united states" in text_lower) and ("lpa" in text_lower or "rupees" in text_lower):
-        reasons.append("⚠️ **Logic Gap:** USA location but salary in INR (LPA).")
-    if "softwares" in text_lower:
-        reasons.append("✍️ **Grammar Alert:** Non-standard plural 'softwares' detected.")
-
-    # 2. Scam Phrasing & Aggressive Demands (UPDATED)
-    if ("pay" in text_lower or "deposit" in text_lower or "transfer" in text_lower):
-        if "kindly" in text_lower:
-            reasons.append("💸 **Scam Phrasing:** 'Kindly pay' pattern detected.")
-        if "immediately" in text_lower or "now" in text_lower:
-            reasons.append("💸 **Aggressive Demand:** Legitimate jobs never demand payment 'immediately' or 'now'.")
-
-    if "provide" in text_lower and ("laptop" in text_lower or "equipment" in text_lower) and "work from home" in text_lower:
-        reasons.append("⚠️ **Equipment Promise:** Promise of free laptop/equipment is a common scam tactic.")
-        
-    # 3. PHISHING & URGENCY
-    if ("update" in text_lower or "fill" in text_lower) and "profile" in text_lower and ("link" in text_lower or "click" in text_lower or "button" in text_lower):
-        reasons.append("🎣 **Phishing Alert:** Request to click a link to 'update profile' is a common data harvesting tactic.")
-    
-    # Broader Urgency Check
-    if "urgent" in text_lower or "immediately" in text_lower:
-        if "hiring" in text_lower or "seconds" in text_lower or "now" in text_lower:
-             reasons.append("⚠️ **Artificial Urgency:** Scammers create pressure to force mistakes.")
-
-    # 4. MONEY MULE (CRITICAL FIX)
-    mule_keywords = ["package", "parcel", "shipment"]
-    action_keywords = ["receive", "repackage", "label", "forward"]
-    location_keywords = ["residential", "home address", "your address"]
-    has_mule_action = any(a in text_lower for a in action_keywords) and any(p in text_lower for p in mule_keywords)
-    has_mule_loc = any(l in text_lower for l in location_keywords)
-    if has_mule_action and has_mule_loc:
-         reasons.append("📦 **Money Mule Alert:** Job involves receiving/forwarding packages at a personal address.")
-
-    # 5. Triggers
-    triggers = {
-        "telegram": "🚨 **Platform Risk:** Telegram contact request.",
-        "whatsapp": "🚨 **Platform Risk:** WhatsApp contact request.",
-        "wire transfer": "💸 **Financial Risk:** Wire Transfer request.",
-        "training fee": "💸 **Financial Risk:** Training fee request."
-    }
-    for word, reason in triggers.items():
-        if word in text_lower: reasons.append(reason)
-        
-    return reasons
-
-def metadata_check(text):
-    advisory = []
-    text_low = text.lower()
-    if "@gmail.com" in text_low or "@yahoo.com" in text_low: advisory.append("ℹ️ **Identity:** Personal email domain used.")
-    if "salary" not in text_low and "$" not in text and "lpa" not in text_low: advisory.append("ℹ️ **Clarity:** Missing salary details.")
-    if "linkedin" not in text_low and "company" not in text_low: advisory.append("ℹ️ **Verification:** No company/social links.")
-    return advisory
-
 # ==========================================
-# 4. APP & RESOURCES
+# 4. APP & MODEL LOADING
 # ==========================================
 app = Flask(__name__)
-app.secret_key = "jobguard_super_secret_key"
+app.secret_key = "jobguard_production_key"
 app.permanent_session_lifetime = timedelta(days=30)
 DB_NAME = "users.db"
 cache = Cache(app, config={"CACHE_TYPE": "SimpleCache", "CACHE_DEFAULT_TIMEOUT": 3600})
 
+# -- LOAD SPACY --
 nlp_engine = None
-supervised_model = None
-anomaly_model = None
-explainer = LimeTextExplainer(class_names=['Real', 'Fake'])
-
 try:
     import spacy
     nlp_engine = spacy.load("en_core_web_lg")
-    log_debug(f"Spacy Model Loaded: {nlp_engine.meta['name']} (v{nlp_engine.meta['version']})", "SUCCESS")
+    log_debug("✅ Spacy Loaded", "SUCCESS")
 except:
-    log_debug("Spacy Load Failed, using blank", "ERROR")
     import spacy
     nlp_engine = spacy.blank("en")
+    log_debug("⚠️ Spacy Failed. Using Blank.", "WARN")
 
-# ⚡ ROBUST INJECTION
-def inject(est):
-    if isinstance(est, SpacyVectorTransformer): 
-        est.nlp = nlp_engine
-        return True
-    
-    injected = False
-    if hasattr(est, 'steps'): 
-        for s in est.steps: 
-            if inject(s[1]): injected = True
-    if hasattr(est, 'transformer_list'):
-        for s in est.transformer_list: 
-            if inject(s[1]): injected = True
-    if hasattr(est, 'transformers'): # ColumnTransformer
-        for s in est.transformers: 
-            if inject(s[1]): injected = True
-    if hasattr(est, 'estimator'):
-        if inject(est.estimator): injected = True
-        
-    return injected
+# -- LOAD MODEL 1: SKLEARN PIPELINE --
+sklearn_pipeline = None
+def force_inject_spacy(estimator, nlp_engine):
+    if isinstance(estimator, SpacyVectorTransformer): estimator.nlp = nlp_engine
+    if hasattr(estimator, 'steps'):
+        for name, step in estimator.steps: force_inject_spacy(step, nlp_engine)
+    if hasattr(estimator, 'transformer_list'):
+        for name, trans in estimator.transformer_list: force_inject_spacy(trans, nlp_engine)
 
 if os.path.exists('production_fake_job_pipeline.pkl'):
     try:
-        supervised_model = joblib.load('production_fake_job_pipeline.pkl')
-        was_injected = inject(supervised_model)
-        if was_injected:
-            log_debug("Supervised Pipeline Loaded & Spacy Vectors LINKED ✅", "SUCCESS")
-        else:
-            log_debug("Supervised Pipeline Loaded but Spacy Link FAILED ❌", "ERROR")
-    except Exception as e: log_debug(f"Supervised Model Error: {e}", "CRITICAL")
+        sklearn_pipeline = joblib.load('production_fake_job_pipeline.pkl')
+        force_inject_spacy(sklearn_pipeline, nlp_engine)
+        log_debug("✅ Sklearn Pipeline Loaded", "SUCCESS")
+    except Exception as e:
+        log_debug(f"❌ Sklearn Load Failed: {e}", "ERROR")
 
+# -- LOAD MODEL 2: DISTILBERT --
+bert_tokenizer = None; bert_model = None
+BERT_PATH = "." 
+
+if os.path.exists("model.safetensors"):
+    try:
+        bert_tokenizer = DistilBertTokenizerFast.from_pretrained(BERT_PATH)
+        bert_model = DistilBertForSequenceClassification.from_pretrained(BERT_PATH)
+        bert_model.eval()
+        log_debug("✅ BERT Model Loaded", "SUCCESS")
+    except Exception as e:
+        log_debug(f"❌ BERT Load Failed: {e}", "CRITICAL")
+else:
+    log_debug(f"⚠️ BERT files not found in current directory.", "WARN")
+
+# -- LOAD MODEL 3: ANOMALY DETECTOR --
+anomaly_model = None
 if os.path.exists('robust_anomaly_model.pkl'):
     try:
         anomaly_model = joblib.load('robust_anomaly_model.pkl')
-        log_debug("Anomaly Detector Loaded", "SUCCESS")
-    except Exception as e: log_debug(f"Anomaly Model Error: {e}", "CRITICAL")
+        log_debug("✅ Anomaly Detector Loaded", "SUCCESS")
+    except: pass
+
+# -- XAI SETUP --
+explainer = LimeTextExplainer(class_names=['Real', 'Fake'])
+
+def bert_lime_predict(texts):
+    if not bert_model: return np.array([[0.5, 0.5]] * len(texts))
+    inputs = bert_tokenizer(texts, return_tensors="pt", padding=True, truncation=True, max_length=512)
+    with torch.no_grad():
+        logits = bert_model(**inputs).logits
+    return F.softmax(logits, dim=1).numpy()
 
 # ==========================================
-# 5. PREDICT ROUTE
+# 5. PREDICTION LOGIC (ENSEMBLE)
 # ==========================================
 @app.route('/predict', methods=['POST'])
 def predict():
-    is_admin = (session.get('user') == 'Yoge')
     trace_logs = []
+    is_admin = session.get('user') == 'Yoge'
+    
     def trace(msg, lvl="INFO"):
         log_debug(msg, lvl)
         if is_admin: trace_logs.append(f"[{datetime.now().strftime('%H:%M:%S')}] [{lvl}] {msg}")
@@ -250,117 +240,87 @@ def predict():
         data = request.get_json(); text = data.get('text', '').strip()
         if not text: return jsonify({'error': 'No input'}), 400
 
-        # CACHE CHECK
         text_hash = hashlib.md5(text.lower().encode('utf-8')).hexdigest()
-        cached_result = cache.get(text_hash)
-        if cached_result:
-            if is_admin:
-                cached_logs = cached_result.get('system_logs', [])
-                cached_logs.insert(0, f"[{datetime.now().strftime('%H:%M:%S')}] [SUCCESS] ⚡ Cache Hit!")
-                cached_result['system_logs'] = cached_logs
-            return jsonify(cached_result)
+        cached = cache.get(text_hash)
+        if cached:
+            if is_admin: 
+                cached['system_logs'] = [f"[CACHE] Hit for {text_hash[:8]}"] + cached.get('system_logs', [])
+            return jsonify(cached)
 
-        trace(f"SCAN STARTED: {len(text)} chars", "INIT")
-        
-        # 3. GATEKEEPER (With Bypass)
+        trace(f"New Scan: {len(text)} chars", "INIT")
         doc = nlp_engine(text); g.spacy_doc = doc
-        alpha = [t for t in doc if t.is_alpha]
-        valid_ratio = len([t for t in alpha if t.has_vector]) / len(alpha) if alpha else 0
-        
-        # Bypass for short scams
-        triggers = ["pay", "fee", "urgent", "immediately", "money", "deposit"]
-        has_trigger = any(t in text.lower() for t in triggers)
-        
-        if not has_trigger and (valid_ratio < 0.4 or len(alpha) < 5):
-            trace(f"Gatekeeper Block. Validity: {valid_ratio:.2f}", "BLOCK")
-            return jsonify({'fraud_probability': 15.0, 'is_gibberish': True, 'reasons': ["🚫 **Language Error:** Text is mostly unintelligible."], 'system_logs': trace_logs})
 
-        smash_pattern = re.compile(r'[bcdfghjklmnpqrstvwxyz]{6,}', re.IGNORECASE)
-        smashes = smash_pattern.findall(text)
-        if smashes:
-            trace(f"Embedded Gibberish Detected: {smashes}", "BLOCK")
-            return jsonify({'fraud_probability': 50.0, 'is_gibberish': True, 'reasons': [f"🚫 **Gibberish Detected:** Random sequences '{smashes[0]}'."], 'system_logs': trace_logs})
+        # --- MODEL 1: BERT ---
+        bert_score = 0.5
+        if bert_model:
+            inputs = bert_tokenizer(text, return_tensors="pt", truncation=True, max_length=512)
+            with torch.no_grad():
+                outputs = bert_model(**inputs)
+            bert_score = F.softmax(outputs.logits, dim=1)[0][1].item()
+            trace(f"BERT Confidence: {bert_score:.4f}", "AI")
 
-        # 4. SUPERVISED AI
-        base_prob = supervised_model.predict_proba([text])[0][1]
-        
-        sentences = re.split(r'(?<=[.!?]) +', text)
-        max_window_prob = 0.0
-        if len(sentences) >= 3:
-            windows = [" ".join(sentences[i:i+3]) for i in range(len(sentences)-2)]
-            window_probs = supervised_model.predict_proba(windows)[:, 1]
-            max_window_prob = np.max(window_probs)
-            trace(f"Sliding Window Peak: {max_window_prob:.4f}", "AI")
-        
-        final_prob = max(base_prob, max_window_prob)
-        trace(f"Base AI Score: {final_prob:.4f}", "AI")
+        # --- MODEL 2: SKLEARN PIPELINE ---
+        sklearn_score = 0.5
+        if sklearn_pipeline:
+            sklearn_score = sklearn_pipeline.predict_proba([text])[0][1]
+            trace(f"Pipeline Confidence: {sklearn_score:.4f}", "AI")
+        else:
+            sklearn_score = bert_score 
 
-        # 5. ANOMALY DETECTOR
-        anomaly_reasons = []
+        # --- MODEL 3: ANOMALY DETECTOR ---
+        anomaly_alerts = []
         if anomaly_model:
             stats = extract_structural_features(text)
             features = np.hstack((doc.vector, np.array(stats)))
-            anomaly_reasons = anomaly_model.predict_with_explanation(features)
-            if anomaly_reasons:
-                boost = 0.10 if final_prob < 0.30 else 0.20
-                final_prob = min(final_prob + boost, 0.98)
-                trace(f"Anomaly Boosted. Final: {final_prob:.4f}", "WARN")
+            anomaly_alerts = anomaly_model.predict_with_explanation(features)
+            if anomaly_alerts: trace(f"Anomaly Detected: {anomaly_alerts}", "WARN")
 
-        # 6. HUMAN ENGINE
-        human_reasons = human_reasoning_engine(text)
-        advisory_notes = metadata_check(text)
+        # --- HEURISTICS & ADVISORY ---
+        heuristic_alerts = heuristic_analysis(text)
+        advisory_notes = metadata_check(text) # <--- Now defined and called correctly
         
-        if human_reasons:
-            boost = 0.25
-            if any("Phishing" in r for r in human_reasons): boost = 0.40
-            if any("Money Mule" in r for r in human_reasons): boost = 0.40
-            final_prob = min(final_prob + boost, 0.98)
-            trace(f"Human Triggers Applied (+{boost})", "WARN")
+        # --- ENSEMBLE VOTING ---
+        heuristic_score = 0.95 if heuristic_alerts else 0.05
+        
+        final_prob = (bert_score * 0.60) + (sklearn_score * 0.25) + (heuristic_score * 0.15)
+        
+        # Genius Override
+        if bert_score > 0.90:
+            final_prob = max(final_prob, bert_score)
 
-        has_green = any(gf in text.lower() for gf in GREEN_FLAGS)
-        if has_green and not human_reasons:
-            original = final_prob
-            final_prob = max(0.05, final_prob - 0.25)
-            trace(f"Green Flags Found. Reduced {original:.2f} -> {final_prob:.2f}", "SUCCESS")
+        if anomaly_alerts:
+            final_prob = min(final_prob + 0.15, 0.99)
+            
+        trace(f"Ensemble Result: {final_prob:.4f}", "RESULT")
 
-        # 7. XAI
+        # --- XAI GENERATION ---
         lime_insights = []
-        if final_prob > 0.10:
-            exp = explainer.explain_instance(text, supervised_model.predict_proba, num_features=3, num_samples=50)
-            lime_insights = [f"**{w}** ({s:+.2f})" for w, s in exp.as_list() if s > 0.05]
+        if final_prob > 0.25:
+            try:
+                exp = explainer.explain_instance(text, bert_lime_predict, num_features=4, num_samples=20)
+                lime_insights = [f"**{w}** ({s:+.2f})" for w, s in exp.as_list() if abs(s) > 0.05]
+            except Exception as e: trace(f"LIME Error: {e}", "ERROR")
 
-        trace(f"SCAN COMPLETE. Verdict: {final_prob:.2%}", "SUCCESS")
-        
-        result = {
+        response = {
             'fraud_probability': round(final_prob * 100, 2),
-            'reasons': human_reasons,
+            'reasons': heuristic_alerts,
             'advisory': advisory_notes,
-            'anomaly_analysis': anomaly_reasons,
+            'anomaly_analysis': anomaly_alerts,
             'xai_insights': lime_insights,
-            'is_gibberish': False,
-            'system_logs': list(reversed(trace_logs))
+            'system_logs': list(reversed(trace_logs)),
+            'verdict': "Fake" if final_prob > 0.45 else "Real"
         }
-
-        cache.set(text_hash, result)
-        return jsonify(result)
+        
+        cache.set(text_hash, response)
+        return jsonify(response)
 
     except Exception as e:
-        trace(f"RUNTIME ERROR: {str(e)}", "ERROR")
+        trace(f"FATAL: {str(e)}", "ERROR")
         return jsonify({'error': str(e)}), 500
 
 # ==========================================
-# 6. AUTH & ROUTES
+# 6. DATABASE & AUTH ROUTES
 # ==========================================
-@app.route('/api/user_info')
-def get_user_info():
-    if 'user' in session: return jsonify({'username': session['user']})
-    return jsonify({'username': None})
-
-@app.route('/api/system_logs')
-def get_global_logs():
-    if session.get('user') != 'Yoge': return jsonify([])
-    return jsonify(list(reversed(SERVER_LOGS)))
-
 def init_db():
     with sqlite3.connect(DB_NAME) as conn:
         conn.cursor().execute('CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL, email TEXT UNIQUE NOT NULL, password TEXT NOT NULL)')
@@ -380,34 +340,29 @@ def api_login():
     data = request.get_json()
     with sqlite3.connect(DB_NAME) as conn:
         row = conn.cursor().execute("SELECT password FROM users WHERE username = ?", (data['username'],)).fetchone()
-        
         if row and check_password_hash(row[0], data['password']):
             session['user'] = data['username']
-            # ⚡ REMEMBER ME FIX
-            if data.get('remember') is True:
-                session.permanent = True
-            else:
-                session.permanent = False
-            # ⚡ RETURN USERNAME FOR SELF-HEALING
+            session.permanent = data.get('remember', False)
             return jsonify({'success': True, 'username': data['username']})
-            
-    return jsonify({'error': 'Failed'}), 401
+    return jsonify({'error': 'Invalid credentials'}), 401
 
 @app.route('/api/logout', methods=['POST'])
 def api_logout(): session.clear(); return jsonify({'success': True})
 
-@app.route('/api/delete_account', methods=['POST'])
-def api_delete_account():
-    with sqlite3.connect(DB_NAME) as conn:
-        conn.cursor().execute("DELETE FROM users WHERE username = ?", (session.get('user'),))
-    session.clear(); return jsonify({'success': True})
+@app.route('/api/user_info')
+def user_info(): return jsonify({'username': session.get('user')})
+
+@app.route('/api/system_logs')
+def get_logs():
+    if session.get('user') != 'Yoge': return jsonify([])
+    return jsonify(list(reversed(SERVER_LOGS)))
 
 @app.route('/')
-def login_page(): return render_template('login.html')
+def home(): return render_template('login.html')
 
 @app.route('/dashboard')
-def dashboard_page():
-    if 'user' not in session: return redirect(url_for('login_page'))
+def dashboard():
+    if 'user' not in session: return redirect(url_for('home'))
     return render_template('index.html', username=session['user'])
 
 if __name__ == '__main__':
