@@ -150,26 +150,66 @@ def extract_structural_features(text):
     word_count = len(text.split())
     return [caps/length, digits/length, specials/length, 1 if "@" in text else 0, 0, 1 if "http" in text else 0, word_count]
 
-# 🟢 NEW: EXPLICIT LANGUAGE/CODE DETECTOR
+# 🟢 FINAL LANGUAGE GUARD (Now checks Word Length too)
 def detect_invalid_language(text):
     if not text: return False, []
     
     issues = []
     length = len(text)
     
-    # 1. Non-English (Unicode) Check
-    # Counts characters outside basic ASCII (0-127)
+    # 1. Non-English (Unicode)
     non_ascii_count = len(re.findall(r'[^\x00-\x7F]', text))
-    if (non_ascii_count / length) > 0.2: # If > 20% is Foreign/Symbols
-        issues.append("Language Error: Non-English text detected (Tamil/Hindi/etc)")
+    if (non_ascii_count / length) > 0.2: 
+        issues.append("Language Error: Non-English text detected")
+        return True, issues 
     
-    # 2. Code/Markup Check
-    # Counts code symbols like { } < > ; = [ ]
+    # 2. Syntax/Symbol Check
     code_symbols = len(re.findall(r'[\{\}\<\>;=\[\]]', text))
-    if (code_symbols / length) > 0.1: # If > 10% is Syntax
-        issues.append("Language Error: Input looks like Source Code or HTML")
+    if (code_symbols / length) > 0.1:
+        issues.append("Language Error: Source Code or HTML detected")
+        return True, issues
 
-    return (len(issues) > 0), issues
+    # 3. Code Keyword Check
+    code_signatures = [
+        "def __init__", "import numpy", "import pandas", "from sklearn", 
+        "public static void", "console.log(", "document.getElementById", 
+        "SELECT * FROM", "INSERT INTO", "<!DOCTYPE html>", 
+        "#!/bin/bash", "std::cout", "System.out.println"
+    ]
+    if any(sig in text for sig in code_signatures):
+        issues.append("Language Error: Programming Code Detected")
+        return True, issues
+
+    if nlp_engine:
+        doc = nlp_engine(text)
+        
+        # 4. LONG WORD TRAP (The "Keysmash" Killer) - NEW!
+        # Catches strings like "adjhfajkshdfjkashdfjkahsdf"
+        # Standard English words rarely exceed 25 chars.
+        for token in doc:
+            if len(token.text) > 25 and not token.like_url:
+                issues.append(f"Language Error: Unnaturally long word detected ({token.text[:15]}...)")
+                return True, issues
+
+        # 5. SPACY VOCABULARY CHECK (Context Aware)
+        valid_words = [t for t in doc if t.is_alpha and not t.is_oov]
+        total_words = [t for t in doc if t.is_alpha]
+        
+        if len(total_words) > 0:
+            valid_ratio = len(valid_words) / len(total_words)
+            
+            # Short Text (< 10 words) must be > 80% Valid
+            if len(total_words) < 10:
+                if valid_ratio < 0.8:
+                    issues.append("Language Error: Short text contains gibberish")
+                    return True, issues
+            
+            # Long Text must be > 50% Valid
+            elif valid_ratio < 0.5:
+                issues.append(f"Language Error: Gibberish Detected ({int(valid_ratio*100)}% valid)")
+                return True, issues
+    
+    return False, []
 
 # ==========================================
 # 4. APP & MODEL LOADING
