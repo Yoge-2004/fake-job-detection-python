@@ -150,65 +150,84 @@ def extract_structural_features(text):
     word_count = len(text.split())
     return [caps/length, digits/length, specials/length, 1 if "@" in text else 0, 0, 1 if "http" in text else 0, word_count]
 
-# 🟢 FINAL LANGUAGE GUARD (Now checks Word Length too)
+
+from wordfreq import zipf_frequency
+
+# 🟢 FINAL GENIUS GUARD (Splits Compound Words automatically)
 def detect_invalid_language(text):
     if not text: return False, []
     
     issues = []
     length = len(text)
     
-    # 1. Non-English (Unicode)
+    # 1. NON-ENGLISH (Unicode Trap)
     non_ascii_count = len(re.findall(r'[^\x00-\x7F]', text))
     if (non_ascii_count / length) > 0.2: 
-        issues.append("Language Error: Non-English text detected")
+        msg = "Language Error: Non-English text detected"
+        issues.append(msg)
+        log_debug(f"🚫 BLOCK: {msg}", "BLOCK")
         return True, issues 
     
-    # 2. Syntax/Symbol Check
+    # 2. SOURCE CODE (Symbol Trap)
     code_symbols = len(re.findall(r'[\{\}\<\>;=\[\]]', text))
-    if (code_symbols / length) > 0.1:
-        issues.append("Language Error: Source Code or HTML detected")
+    if (code_symbols / length) > 0.10: 
+        msg = "Language Error: Source Code or HTML detected"
+        issues.append(msg)
+        log_debug(f"🚫 BLOCK: {msg}", "BLOCK")
         return True, issues
 
-    # 3. Code Keyword Check
-    code_signatures = [
-        "def __init__", "import numpy", "import pandas", "from sklearn", 
-        "public static void", "console.log(", "document.getElementById", 
-        "SELECT * FROM", "INSERT INTO", "<!DOCTYPE html>", 
-        "#!/bin/bash", "std::cout", "System.out.println"
-    ]
+    # 3. SECURITY TRAP
+    code_signatures = ["def __init__", "public static void", "<script>", "SELECT * FROM"]
     if any(sig in text for sig in code_signatures):
-        issues.append("Language Error: Programming Code Detected")
+        msg = "Language Error: Programming Code Detected"
+        issues.append(msg)
+        log_debug(f"🚫 BLOCK: {msg}", "BLOCK")
         return True, issues
 
-    if nlp_engine:
-        doc = nlp_engine(text)
-        
-        # 4. LONG WORD TRAP (The "Keysmash" Killer) - NEW!
-        # Catches strings like "adjhfajkshdfjkashdfjkahsdf"
-        # Standard English words rarely exceed 25 chars.
-        for token in doc:
-            if len(token.text) > 25 and not token.like_url:
-                issues.append(f"Language Error: Unnaturally long word detected ({token.text[:15]}...)")
-                return True, issues
-
-        # 5. SPACY VOCABULARY CHECK (Context Aware)
-        valid_words = [t for t in doc if t.is_alpha and not t.is_oov]
-        total_words = [t for t in doc if t.is_alpha]
-        
-        if len(total_words) > 0:
-            valid_ratio = len(valid_words) / len(total_words)
-            
-            # Short Text (< 10 words) must be > 80% Valid
-            if len(total_words) < 10:
-                if valid_ratio < 0.8:
-                    issues.append("Language Error: Short text contains gibberish")
-                    return True, issues
-            
-            # Long Text must be > 50% Valid
-            elif valid_ratio < 0.5:
-                issues.append(f"Language Error: Gibberish Detected ({int(valid_ratio*100)}% valid)")
-                return True, issues
+    # 4. SMART GIBBERISH DETECTION
+    tokens = [t for t in text.split() if t.isalpha()]
     
+    if not tokens: return False, [] 
+    
+    unknown_word_count = 0
+    total_checked = 0
+
+    for token in tokens:
+        if len(token) < 4: continue 
+        total_checked += 1
+        
+        lower_token = token.lower()
+        
+        # A. Direct Check
+        if zipf_frequency(lower_token, 'en') > 0.0:
+            continue # Valid
+            
+        # B. Compound Splitter Check (The "SpringBoot" Solver)
+        # If 'SpringBoot' is unknown, try to split it: 'Spring' + 'Boot'
+        is_compound = False
+        if len(lower_token) > 6: # Only try for longish words
+            for i in range(3, len(lower_token) - 2): # Try splits
+                part1 = lower_token[:i]
+                part2 = lower_token[i:]
+                if zipf_frequency(part1, 'en') > 0.0 and zipf_frequency(part2, 'en') > 0.0:
+                    is_compound = True
+                    break
+        
+        if is_compound:
+            continue # Valid (It's made of two valid words)
+
+        # If A and B fail, it's truly gibberish
+        unknown_word_count += 1
+
+    if total_checked > 0:
+        gibberish_ratio = unknown_word_count / total_checked
+        
+        if gibberish_ratio > 0.5:
+            msg = f"Language Error: Gibberish Detected ({int(gibberish_ratio*100)}% unknown)"
+            issues.append(msg)
+            log_debug(f"🚫 BLOCK: {msg}", "BLOCK")
+            return True, issues
+
     return False, []
 
 # ==========================================
@@ -360,7 +379,7 @@ def predict():
         if bert_score > 0.90:
             final_prob = max(final_prob, bert_score)
 
-        # 🛡️ SMART ANOMALY OVERRIDE (Fixes Cognizant False Positive)
+        # 🛡️ SMART ANOMALY OVERRIDE (Fixes False Positive)
         if anomaly_alerts:
             # Extract MSE value to judge severity
             mse_value = 0.0
@@ -413,7 +432,7 @@ def predict():
     except Exception as e:
         trace(f"FATAL: {str(e)}", "ERROR")
         return jsonify({'error': str(e)}), 500
-
+        
 # ==========================================
 # 6. DATABASE & AUTH ROUTES
 # ==========================================
@@ -464,7 +483,7 @@ def delete_account():
     except Exception as e:
         log_debug(f"Delete Failed: {e}", "ERROR")
         return jsonify({'error': str(e)}), 500
-        
+
 @app.route('/api/user_info')
 def user_info(): return jsonify({'username': session.get('user')})
 
@@ -479,7 +498,4 @@ def home(): return render_template('login.html')
 @app.route('/dashboard')
 def dashboard():
     if 'user' not in session: return redirect(url_for('home'))
-    return render_template('index.html', username=session['user'])
-
-if __name__ == '__main__':
-    app.run(debug=True)
+    return render_template('index.html', username=session[
