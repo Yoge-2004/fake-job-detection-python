@@ -296,7 +296,7 @@ def bert_lime_predict(texts):
     return F.softmax(logits, dim=1).numpy()
 
 # ==========================================
-# 5. PREDICTION LOGIC (SMART ENSEMBLE)
+# 5. PREDICTION LOGIC (HIERARCHY: BERT > SKLEARN > ANOMALY)
 # ==========================================
 @app.route('/predict', methods=['POST'])
 def predict():
@@ -310,123 +310,122 @@ def predict():
     try:
         data = request.get_json(); text = data.get('text', '').strip()
         if not text: return jsonify({'error': 'No input'}), 400
-
-        text_hash = hashlib.md5(text.lower().encode('utf-8')).hexdigest()
-        cached = cache.get(text_hash)
-        if cached:
-            if is_admin: 
-                cached['system_logs'] = [f"[CACHE] Hit for {text_hash[:8]}"] + cached.get('system_logs', [])
-            return jsonify(cached)
-
-        trace(f"New Scan: {len(text)} chars", "INIT")
         
-        # 🟢 1. CHECK: LANGUAGE & GIBBERISH
+        # 1. GIBBERISH CHECK (Immediate Block)
         is_invalid_lang, lang_issues = detect_invalid_language(text)
         if is_invalid_lang:
-            trace(f"Language Error: {lang_issues[0]}", "BLOCK")
-            response = {
-                'fraud_probability': 0, # Neutral score 
-                'is_gibberish': True,   # Triggers YELLOW UI
-                'reasons': [],
-                'advisory': [],
-                'anomaly_analysis': lang_issues,
-                'xai_insights': [],
-                'system_logs': list(reversed(trace_logs)),
-                'verdict': "Invalid"
-            }
-            cache.set(text_hash, response)
-            return jsonify(response)
+            return jsonify({
+                'fraud_probability': 0, 'is_gibberish': True, 'reasons': [], 
+                'advisory': [], 'anomaly_analysis': lang_issues, 'xai_insights': [],
+                'system_logs': [], 'verdict': "Invalid"
+            })
 
-        # START NORMAL AI PIPELINE
+        # 2. RUN MODELS
         doc = nlp_engine(text); g.spacy_doc = doc
 
-        # --- MODEL 1: BERT (Context Brain) ---
+        # --- MODEL 1: BERT (THE KING 👑) ---
         bert_score = 0.5
         if bert_model:
             inputs = bert_tokenizer(text, return_tensors="pt", truncation=True, max_length=512)
-            with torch.no_grad():
-                outputs = bert_model(**inputs)
+            with torch.no_grad(): outputs = bert_model(**inputs)
             bert_score = F.softmax(outputs.logits, dim=1)[0][1].item()
             trace(f"BERT Confidence: {bert_score:.4f}", "AI")
 
-        # --- MODEL 2: SKLEARN PIPELINE (Pattern Brain) ---
+        # --- MODEL 2: SKLEARN (THE BACKUP 🛡️) ---
         sklearn_score = 0.5
         if sklearn_pipeline:
             sklearn_score = sklearn_pipeline.predict_proba([text])[0][1]
-            trace(f"Pipeline Confidence: {sklearn_score:.4f}", "AI")
-        else:
-            sklearn_score = bert_score 
+            trace(f"Sklearn Confidence: {sklearn_score:.4f}", "AI")
 
-        # --- MODEL 3: ANOMALY DETECTOR (Structure Brain) ---
+        # --- MODEL 3: ANOMALY (THE WEAKEST ⚠️) ---
         anomaly_alerts = []
+        mse_value = 0.0
         if anomaly_model:
             stats = extract_structural_features(text)
             features = np.hstack((doc.vector, np.array(stats)))
             anomaly_alerts = anomaly_model.predict_with_explanation(features)
-            if anomaly_alerts: trace(f"Anomaly Detected: {anomaly_alerts}", "WARN")
-
-        # --- HEURISTICS & ADVISORY ---
-        heuristic_alerts = heuristic_analysis(text)
-        advisory_notes = metadata_check(text) 
-        
-        # --- ENSEMBLE VOTING ---
-        heuristic_score = 0.95 if heuristic_alerts else 0.05
-        
-        # Weighted Vote: BERT (60%) + Pipeline (25%) + Heuristics (15%)
-        final_prob = (bert_score * 0.60) + (sklearn_score * 0.25) + (heuristic_score * 0.15)
-        
-        # 🚀 GENIUS OVERRIDE (Trust BERT if highly confident)
-        if bert_score > 0.90:
-            final_prob = max(final_prob, bert_score)
-
-        # 🛡️ SMART ANOMALY OVERRIDE (Fixes False Positive)
-        if anomaly_alerts:
-            # Extract MSE value to judge severity
-            mse_value = 0.0
             for alert in anomaly_alerts:
                 match = re.search(r"MSE:\s*([\d\.]+)", alert)
-                if match:
-                    mse_value = float(match.group(1))
+                if match: mse_value = float(match.group(1))
+            if anomaly_alerts: trace(f"Anomaly Detected (MSE {mse_value:.4f})", "WARN")
+
+        # =========================================================
+        # 🧠 SCORING LOGIC (BERT PRIORITY)
+        # =========================================================
+        
+        final_prob = 0.0
+        
+        # 1. BERT AUTHORITY (If BERT is sure, we trust it)
+        if bert_score > 0.85:
+            final_prob = bert_score
+            trace("Logic: BERT Authority (Trusting Model #1)", "RESULT")
             
-            # Apply Dynamic Logic
-            if mse_value > 0.02: 
-                # Case A: High Error (Gibberish/Obfuscation) -> FORCE FAKE
-                original_score = final_prob
-                final_prob = max(final_prob + 0.40, 0.55)
-                final_prob = min(final_prob, 0.99)
-                trace(f"Anomaly Critical Override (High MSE {mse_value}): {original_score:.2f} -> {final_prob:.2f}", "WARN")
+        # 2. SKLEARN BACKUP (If BERT is unsure/sleeping, but Sklearn screams danger)
+        elif sklearn_score > 0.80:
+            final_prob = sklearn_score
+            trace("Logic: Sklearn Override (BERT asleep, Model #2 active)", "RESULT")
+
+        # 3. CONSENSUS (Both see something, even if not extremely high)
+        elif bert_score > 0.60 and sklearn_score > 0.60:
+            final_prob = (bert_score + sklearn_score) / 2
+            trace("Logic: Moderate Consensus", "RESULT")
+
+        # 4. "REVIEW REQUIRED" (with False Positive Protection)
+        else:
+            max_risk = max(bert_score, sklearn_score)
             
-            elif mse_value > 0.008:
-                # Case B: Medium Error (Weird formatting) -> SMALL PENALTY
-                final_prob = min(final_prob + 0.10, 0.80)
-                trace(f"Anomaly Soft Penalty (Med MSE {mse_value}): +10%", "WARN")
-                
+            # A. Define "Proven Safe" Status
+            # If both smart models are < 15%, the text is likely professional/safe.
+            is_proven_safe = (bert_score < 0.15 and sklearn_score < 0.15)
+            
+            suspects_something = False
+            
+            # Check Sklearn (Trust it if it sees risk > 45%)
+            if sklearn_score > 0.45: 
+                suspects_something = True
+                trace("Trigger: Sklearn Suspicion", "INFO")
+            
+            # Check Anomaly (BUT apply the Safety Override)
+            if anomaly_alerts:
+                # If the text is Proven Safe by the big models, IGNORE the Anomaly
+                if is_proven_safe:
+                    trace(f"Anomaly Silenced: Overridden by High Confidence Safety (Scores < 15%)", "INFO")
+                else:
+                    suspects_something = True
+                    trace("Trigger: Anomaly Not Silenced (Models Uncertain)", "INFO")
+            
+            # Final Decision
+            if suspects_something:
+                # Force "Review" (Yellow)
+                final_prob = max(max_risk, 0.45)
+                trace("Logic: Suspicion Validated -> Force Review Required", "WARN")
             else:
-                # Case C: Low Error (Complex Real Job) -> IGNORE
-                trace(f"Anomaly Ignored (Low MSE {mse_value}): Trusting BERT", "INFO")
+                # Keep it Green
+                final_prob = max_risk
+                trace("Logic: System Clean (Safety Checks Passed)", "RESULT")
 
-        trace(f"Ensemble Result: {final_prob:.4f}", "RESULT")
+        trace(f"Final Scoring: {final_prob:.4f}", "RESULT")
 
-        # --- XAI GENERATION ---
+        # XAI Generation
         lime_insights = []
-        if final_prob > 0.25:
+        if final_prob > 0.35:
             try:
-                exp = explainer.explain_instance(text, bert_lime_predict, num_features=4, num_samples=20)
-                lime_insights = [f"**{w}** ({s:+.2f})" for w, s in exp.as_list() if abs(s) > 0.05]
-            except Exception as e: pass
+                exp = explainer.explain_instance(text, bert_lime_predict, num_features=4)
+                lime_insights = [f"**{w}**" for w, s in exp.as_list() if s > 0]
+            except: pass
 
         response = {
             'fraud_probability': round(final_prob * 100, 2),
-            'reasons': heuristic_alerts,
-            'advisory': advisory_notes,
+            'reasons': heuristic_analysis(text),
+            'advisory': metadata_check(text),
             'anomaly_analysis': anomaly_alerts,
             'is_gibberish': False,
             'xai_insights': lime_insights,
             'system_logs': list(reversed(trace_logs)),
-            'verdict': "Fake" if final_prob > 0.45 else "Real"
+            # Visual Verdict Logic
+            'verdict': "Fake" if final_prob > 0.50 else ("Review" if final_prob > 0.35 else "Real")
         }
         
-        cache.set(text_hash, response)
         return jsonify(response)
 
     except Exception as e:
@@ -497,5 +496,4 @@ def home(): return render_template('login.html')
 
 @app.route('/dashboard')
 def dashboard():
-    if 'user' not in session: return redirect(url_for('home'))
-    return render_template('index.html', username=session[
+    if 'user' not in sess
