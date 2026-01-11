@@ -31,7 +31,6 @@ from datetime import timedelta
 from werkzeug.security import generate_password_hash, check_password_hash
 from lime.lime_text import LimeTextExplainer
 
-# BERT & DEEP LEARNING IMPORTS
 import torch
 import torch.nn.functional as F
 from transformers import DistilBertTokenizerFast, DistilBertForSequenceClassification
@@ -150,82 +149,57 @@ def extract_structural_features(text):
     word_count = len(text.split())
     return [caps/length, digits/length, specials/length, 1 if "@" in text else 0, 0, 1 if "http" in text else 0, word_count]
 
-
 from wordfreq import zipf_frequency
 
-# 🟢 FINAL GENIUS GUARD (Splits Compound Words automatically)
 def detect_invalid_language(text):
     if not text: return False, []
-    
     issues = []
     length = len(text)
     
-    # 1. NON-ENGLISH (Unicode Trap)
     non_ascii_count = len(re.findall(r'[^\x00-\x7F]', text))
     if (non_ascii_count / length) > 0.2: 
         msg = "Language Error: Non-English text detected"
         issues.append(msg)
-        log_debug(f"🚫 BLOCK: {msg}", "BLOCK")
         return True, issues 
     
-    # 2. SOURCE CODE (Symbol Trap)
     code_symbols = len(re.findall(r'[\{\}\<\>;=\[\]]', text))
     if (code_symbols / length) > 0.10: 
         msg = "Language Error: Source Code or HTML detected"
         issues.append(msg)
-        log_debug(f"🚫 BLOCK: {msg}", "BLOCK")
         return True, issues
 
-    # 3. SECURITY TRAP
     code_signatures = ["def __init__", "public static void", "<script>", "SELECT * FROM"]
     if any(sig in text for sig in code_signatures):
         msg = "Language Error: Programming Code Detected"
         issues.append(msg)
-        log_debug(f"🚫 BLOCK: {msg}", "BLOCK")
         return True, issues
 
-    # 4. SMART GIBBERISH DETECTION
     tokens = [t for t in text.split() if t.isalpha()]
-    
     if not tokens: return False, [] 
     
     unknown_word_count = 0
     total_checked = 0
-
     for token in tokens:
         if len(token) < 4: continue 
         total_checked += 1
-        
         lower_token = token.lower()
-        
-        # A. Direct Check
-        if zipf_frequency(lower_token, 'en') > 0.0:
-            continue # Valid
-            
-        # B. Compound Splitter Check (The "SpringBoot" Solver)
-        # If 'SpringBoot' is unknown, try to split it: 'Spring' + 'Boot'
+        if zipf_frequency(lower_token, 'en') > 0.0: continue 
         is_compound = False
-        if len(lower_token) > 6: # Only try for longish words
-            for i in range(3, len(lower_token) - 2): # Try splits
+        if len(lower_token) > 6: 
+            for i in range(3, len(lower_token) - 2): 
                 part1 = lower_token[:i]
                 part2 = lower_token[i:]
                 if zipf_frequency(part1, 'en') > 0.0 and zipf_frequency(part2, 'en') > 0.0:
                     is_compound = True
                     break
-        
-        if is_compound:
-            continue # Valid (It's made of two valid words)
-
-        # If A and B fail, it's truly gibberish
+        if is_compound: continue
         unknown_word_count += 1
 
     if total_checked > 0:
         gibberish_ratio = unknown_word_count / total_checked
-        
         if gibberish_ratio > 0.5:
             msg = f"Language Error: Gibberish Detected ({int(gibberish_ratio*100)}% unknown)"
             issues.append(msg)
-            log_debug(f"🚫 BLOCK: {msg}", "BLOCK")
             return True, issues
 
     return False, []
@@ -296,7 +270,7 @@ def bert_lime_predict(texts):
     return F.softmax(logits, dim=1).numpy()
 
 # ==========================================
-# 5. PREDICTION LOGIC (HIERARCHY: BERT > SKLEARN > ANOMALY)
+# 5. PREDICTION LOGIC (WITH FIXED OVERRIDE)
 # ==========================================
 @app.route('/predict', methods=['POST'])
 def predict():
@@ -311,19 +285,29 @@ def predict():
         data = request.get_json(); text = data.get('text', '').strip()
         if not text: return jsonify({'error': 'No input'}), 400
         
-        # 1. GIBBERISH CHECK (Immediate Block)
+        # 🟢 RESTORED CACHING
+        text_hash = hashlib.md5(text.lower().encode('utf-8')).hexdigest()
+        cached = cache.get(text_hash)
+        if cached:
+            if is_admin: 
+                cached['system_logs'] = [f"[CACHE] Hit for {text_hash[:8]}"] + cached.get('system_logs', [])
+            return jsonify(cached)
+
+        # 1. GIBBERISH CHECK
         is_invalid_lang, lang_issues = detect_invalid_language(text)
         if is_invalid_lang:
-            return jsonify({
+            response = {
                 'fraud_probability': 0, 'is_gibberish': True, 'reasons': [], 
                 'advisory': [], 'anomaly_analysis': lang_issues, 'xai_insights': [],
                 'system_logs': [], 'verdict': "Invalid"
-            })
+            }
+            cache.set(text_hash, response) # Cache invalid inputs too
+            return jsonify(response)
 
         # 2. RUN MODELS
         doc = nlp_engine(text); g.spacy_doc = doc
 
-        # --- MODEL 1: BERT (THE KING 👑) ---
+        # --- MODEL 1: BERT ---
         bert_score = 0.5
         if bert_model:
             inputs = bert_tokenizer(text, return_tensors="pt", truncation=True, max_length=512)
@@ -331,13 +315,13 @@ def predict():
             bert_score = F.softmax(outputs.logits, dim=1)[0][1].item()
             trace(f"BERT Confidence: {bert_score:.4f}", "AI")
 
-        # --- MODEL 2: SKLEARN (THE BACKUP 🛡️) ---
+        # --- MODEL 2: SKLEARN ---
         sklearn_score = 0.5
         if sklearn_pipeline:
             sklearn_score = sklearn_pipeline.predict_proba([text])[0][1]
             trace(f"Sklearn Confidence: {sklearn_score:.4f}", "AI")
 
-        # --- MODEL 3: ANOMALY (THE WEAKEST ⚠️) ---
+        # --- MODEL 3: ANOMALY ---
         anomaly_alerts = []
         mse_value = 0.0
         if anomaly_model:
@@ -347,70 +331,70 @@ def predict():
             for alert in anomaly_alerts:
                 match = re.search(r"MSE:\s*([\d\.]+)", alert)
                 if match: mse_value = float(match.group(1))
-            if anomaly_alerts: trace(f"Anomaly Detected (MSE {mse_value:.4f})", "WARN")
+            
+            # 🟢 FIX: IGNORE TINY MSE NOISE (Like 0.0045)
+            if mse_value > 0.008: 
+                trace(f"Anomaly Detected (MSE {mse_value:.4f})", "WARN")
+            else:
+                # Silently drop very weak anomalies
+                anomaly_alerts = [] 
 
         # =========================================================
-        # 🧠 SCORING LOGIC (BERT PRIORITY)
+        # 🧠 SCORING LOGIC
         # =========================================================
         
         final_prob = 0.0
         
-        # 1. BERT AUTHORITY (If BERT is sure, we trust it)
+        # 1. BERT AUTHORITY
         if bert_score > 0.85:
             final_prob = bert_score
-            trace("Logic: BERT Authority (Trusting Model #1)", "RESULT")
+            trace("Logic: BERT Authority", "RESULT")
             
-        # 2. SKLEARN BACKUP (If BERT is unsure/sleeping, but Sklearn screams danger)
+        # 2. SKLEARN BACKUP
         elif sklearn_score > 0.80:
             final_prob = sklearn_score
-            trace("Logic: Sklearn Override (BERT asleep, Model #2 active)", "RESULT")
+            trace("Logic: Sklearn Override", "RESULT")
 
-        # 3. CONSENSUS (Both see something, even if not extremely high)
+        # 3. CONSENSUS
         elif bert_score > 0.60 and sklearn_score > 0.60:
             final_prob = (bert_score + sklearn_score) / 2
             trace("Logic: Moderate Consensus", "RESULT")
 
-        # 4. "REVIEW REQUIRED" (with False Positive Protection)
+        # 4. REVIEW LOGIC (With Relaxed "Proven Safe" Threshold)
         else:
             max_risk = max(bert_score, sklearn_score)
             
-            # A. Define "Proven Safe" Status
-            # If both smart models are < 15%, the text is likely professional/safe.
-            is_proven_safe = (bert_score < 0.15 and sklearn_score < 0.15)
+            # 🟢 FIX: RELAXED SAFETY THRESHOLD
+            # If BERT is ultra-safe (<10%), we trust it completely.
+            # OR if both are reasonably safe (<30%), we trust them.
+            is_proven_safe = (bert_score < 0.10) or (bert_score < 0.20 and sklearn_score < 0.30)
             
             suspects_something = False
             
-            # Check Sklearn (Trust it if it sees risk > 45%)
             if sklearn_score > 0.45: 
                 suspects_something = True
-                trace("Trigger: Sklearn Suspicion", "INFO")
             
-            # Check Anomaly (BUT apply the Safety Override)
             if anomaly_alerts:
-                # If the text is Proven Safe by the big models, IGNORE the Anomaly
                 if is_proven_safe:
-                    trace(f"Anomaly Silenced: Overridden by High Confidence Safety (Scores < 15%)", "INFO")
+                    trace(f"Anomaly Silenced: Overridden by Safety Logic (BERT {bert_score:.2f}, SK {sklearn_score:.2f})", "INFO")
                 else:
                     suspects_something = True
-                    trace("Trigger: Anomaly Not Silenced (Models Uncertain)", "INFO")
+                    trace("Trigger: Anomaly Validated (Models Uncertain)", "INFO")
             
-            # Final Decision
             if suspects_something:
-                # Force "Review" (Yellow)
                 final_prob = max(max_risk, 0.45)
                 trace("Logic: Suspicion Validated -> Force Review Required", "WARN")
             else:
-                # Keep it Green
                 final_prob = max_risk
-                trace("Logic: System Clean (Safety Checks Passed)", "RESULT")
+                trace("Logic: System Clean", "RESULT")
 
         trace(f"Final Scoring: {final_prob:.4f}", "RESULT")
 
-        # XAI Generation
+        # XAI Generation (🟢 FIX: Limit samples to 20 to prevent crash)
         lime_insights = []
         if final_prob > 0.35:
             try:
-                exp = explainer.explain_instance(text, bert_lime_predict, num_features=4, num_samples=50)
+                exp = explainer.explain_instance(text, bert_lime_predict, num_features=4, num_samples=20)
                 lime_insights = [f"**{w}**" for w, s in exp.as_list() if s > 0]
             except: pass
 
@@ -422,9 +406,11 @@ def predict():
             'is_gibberish': False,
             'xai_insights': lime_insights,
             'system_logs': list(reversed(trace_logs)),
-            # Visual Verdict Logic
             'verdict': "Fake" if final_prob > 0.50 else ("Review" if final_prob > 0.35 else "Real")
         }
+        
+        # 🟢 RESTORED CACHING
+        cache.set(text_hash, response)
         
         return jsonify(response)
 
@@ -465,22 +451,16 @@ def api_logout(): session.clear(); return jsonify({'success': True})
 
 @app.route('/api/delete_account', methods=['POST'])
 def delete_account():
-    if 'user' not in session: 
-        return jsonify({'error': 'Unauthorized'}), 401
-    
+    if 'user' not in session: return jsonify({'error': 'Unauthorized'}), 401
     try:
         username = session['user']
         with sqlite3.connect(DB_NAME) as conn:
             cursor = conn.cursor()
             cursor.execute("DELETE FROM users WHERE username = ?", (username,))
             conn.commit()
-            
         session.clear()
-        log_debug(f"⚠️ Account Deleted: {username}", "WARN")
         return jsonify({'success': True})
-        
     except Exception as e:
-        log_debug(f"Delete Failed: {e}", "ERROR")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/user_info')
@@ -496,4 +476,8 @@ def home(): return render_template('login.html')
 
 @app.route('/dashboard')
 def dashboard():
-    if 'user' not in sess
+    if 'user' not in session: return redirect(url_for('home'))
+    return render_template('index.html', username=session['user'])
+
+if __name__ == '__main__':
+    app.run(debug=True)
