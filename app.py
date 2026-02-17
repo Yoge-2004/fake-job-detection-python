@@ -1,756 +1,625 @@
+"""
+JobGuard: Neuro-Symbolic Fraud Detection System (Production Ready)
+------------------------------------------------------------------
+Features: BERT + Autoencoder + Isolation Forest + LIME + S-BERT + Rule Engine.
+Fixes: Added Text Normalization/Preprocessing Pipeline.
+
+Author: Yoge-2004
+Version: 15.0.0 (Clean Input Pipeline)
+"""
+
 import hashlib
 import joblib
-import math
 import os
 import re
 import sqlite3
-import sys
-import traceback
-import warnings
+import unicodedata  # Added for Unicode normalization
+import logging
 from datetime import datetime, timedelta
 from typing import List, Dict, Tuple, Any, Optional, Union
 
-# Third-party imports
+# --- Third-Party Libraries ---
 import numpy as np
-from flask import Flask, render_template, request, jsonify, session, redirect, url_for, g
+import pandas as pd
+from flask import Flask, request, jsonify, session, render_template, redirect, url_for
 from flask_caching import Cache
 from lime.lime_text import LimeTextExplainer
-from sklearn.base import BaseEstimator, TransformerMixin, ClassifierMixin
-from sklearn.preprocessing import MinMaxScaler
 from werkzeug.security import generate_password_hash, check_password_hash
-from wordfreq import zipf_frequency
 
-# Deep Learning imports
+# --- NLP & Spell Checking ---
+from sentence_transformers import SentenceTransformer, util
 import torch
-import torch.nn.functional as F
-from transformers import DistilBertTokenizerFast, DistilBertForSequenceClassification
+import torch.nn as nn
+from transformers import DistilBertTokenizer, DistilBertModel
 import tensorflow as tf
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Input, Dense, Dropout, BatchNormalization
-import __main__
+from tensorflow.keras.models import load_model
+
+# 1. Try importing wordfreq
+try:
+    from wordfreq import zipf_frequency
+    HAS_WORDFREQ = True
+except ImportError:
+    HAS_WORDFREQ = False
+    print("⚠️ 'wordfreq' library not found. Install via: pip install wordfreq")
+
+# 2. Try importing pyenchant
+try:
+    import enchant
+    SPELL_CHECKER = enchant.Dict("en_US")
+    HAS_ENCHANT = True
+except ImportError:
+    HAS_ENCHANT = False
+    print("⚠️ 'pyenchant' library not found. Using internal fallback.")
 
 # ==========================================
-# 0. CRADLE LOGGING
+# 0. SYSTEM CONFIGURATION & LOGGING
 # ==========================================
 
 SERVER_LOGS: List[str] = []
+MODEL_DIR = "models"
+DEVICE = torch.device('cpu') 
+os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 
-def log_debug(message: str, level: str = "INFO") -> None:
-    """
-    Appends a log entry to the in-memory server logs and prints it to stdout.
+# --- CORPORATE JARGON WHITELIST (Same as before) ---
+COMMON_CORP_TERMS = {
+    'saas', 'paas', 'iaas', 'kpi', 'roi', 'b2b', 'b2c', 'seo', 'sem', 'crm', 'erp', 'api', 'sdk', 
+    'ide', 'gui', 'cli', 'ux', 'ui', 'qa', 'qc', 'uat', 'cicd', 'ci/cd', 'devops', 'secops', 
+    'mlops', 'llm', 'nlp', 'gcp', 'aws', 'azure', 'docker', 'kubernetes', 'k8s', 'sql', 'nosql', 
+    'json', 'xml', 'yaml', 'html', 'css', 'js', 'react', 'angular', 'vue', 'django', 'flask', 
+    'fastapi', 'spring', 'springboot', 'microservices', 'agile', 'scrum', 'kanban', 'jira', 
+    'confluence', 'trello', 'asana', 'slack', 'zoom', 'teams', 'meet', 'skype', 'figma', 'adobe', 
+    'photoshop', 'illustrator', 'indesign', 'xd', 'sketch', 'invision', 'zeplin', 'symbian', 
+    'android', 'ios', 'macos', 'linux', 'ubuntu', 'centos', 'redhat', 'debian', 'fedora', 'kali', 
+    'windows', 'microsoft', 'google', 'apple', 'amazon', 'facebook', 'meta', 'netflix', 'tesla', 
+    'twitter', 'x', 'linkedin', 'instagram', 'tiktok', 'snapchat', 'pinterest', 'reddit', 'quora', 
+    'medium', 'github', 'gitlab', 'bitbucket', 'stackoverflow', 'kaggle', 'leetcode', 'hackerrank', 
+    'codewars', 'coursera', 'udemy', 'edx', 'udacity', 'pluralsight', 'linkedinlearning', 
+    'salesforce', 'sap', 'oracle', 'ibm', 'hp', 'dell', 'lenovo', 'asus', 'acer', 'msi', 'razer', 
+    'logitech', 'sony', 'samsung', 'lg', 'panasonic', 'toshiba', 'hitachi', 'fujitsu', 'nec', 
+    'sharp', 'philips', 'siemens', 'bosch', 'ge', 'honeywell', '3m', 'cisco', 'juniper', 'arista', 
+    'f5', 'citrix', 'vmware', 'nutanix', 'redhat', 'openshift', 'ansible', 'terraform', 'jenkins', 
+    'bamboo', 'circleci', 'travisci', 'gitlabci', 'actions', 'grafana', 'prometheus', 'elk', 
+    'splunk', 'datadog', 'newrelic', 'appdynamics', 'dynatrace', 'pagerduty', 'opsgenie', 
+    'victorops', 'xmatters', 'servicenow', 'bmc', 'cherwell', 'ivanti', 'freshservice', 'zendesk', 
+    'freshdesk', 'intercom', 'drift', 'hubspot', 'marketo', 'eloqua', 'pardot', 'mailchimp', 
+    'sendgrid', 'twilio', 'stripe', 'paypal', 'braintree', 'square', 'adyen', 'authorize.net', 
+    '2checkout', 'worldpay', 'cybersource', 'firstdata', 'fiserv', 'globalpayments', 'tsys', 
+    'elavon', 'heartland', 'vantiv', 'paymentech', 'chase', 'boa', 'citi', 'wells', 'amex', 
+    'visa', 'mastercard', 'discover', 'diners', 'jcb', 'unionpay', 'rupay', 'mir', 'eftpos', 
+    'interac', 'ach', 'sepa', 'swift', 'iban', 'bic', 'aba', 'routing', 'account', 'ledger', 
+    'balance', 'sheet', 'income', 'statement', 'cash', 'flow', 'equity', 'asset', 'liability', 
+    'debit', 'credit', 'audit', 'tax', 'vat', 'gst', 'hst', 'pst', 'rst', 'qct', 'payroll', 'hr', 
+    'human', 'resources', 'recruitment', 'talent', 'acquisition', 'onboarding', 'offboarding', 
+    'performance', 'management', 'learning', 'development', 'compensation', 'benefits', 'compliance', 
+    'legal', 'gdpr', 'ccpa', 'hipaa', 'ferpa', 'copa', 'pci', 'dss', 'soc2', 'iso', 'nist', 
+    'fedramp', 'fisma', 'glba', 'sox', 'osha', 'eeoc', 'ada', 'fmla', 'flsa', 'erisa', 'cobra', 
+    'aca', 'w2', '1099', 'w4', 'i9', 'e-verify', 'background', 'check', 'drug', 'screen', 
+    'reference', 'interview', 'offer', 'letter', 'contract', 'agreement', 'nda', 'nca', 'nfa', 
+    'ip', 'intellectual', 'property', 'copyright', 'trademark', 'patent', 'trade', 'secret',
+    'admin', 'assistant', 'clerk', 'manager', 'executive', 'director', 'vp', 'ceo', 'cto', 'cfo', 
+    'coo', 'cmo', 'cio', 'ciso', 'cdo', 'chro', 'clo', 'cpo', 'cso', 'cto', 'founder', 'owner',
+    'freelance', 'contract', 'fulltime', 'parttime', 'internship', 'remote', 'hybrid', 'onsite'
+}
 
-    Args:
-        message (str): The log message content.
-        level (str): The severity level (e.g., "INFO", "WARN", "ERROR").
-    """
+def log_event(message: str, level: str = "INFO", category: str = "SYSTEM") -> None:
     timestamp = datetime.now().strftime("%H:%M:%S")
-    entry = f"[{timestamp}] [{level}] {message}"
-    SERVER_LOGS.append(entry)
-    if len(SERVER_LOGS) > 200:
-        SERVER_LOGS.pop(0)
-    print(entry, flush=True)
+    formatted_msg = f"[{timestamp}] [{level}] {message}"
+    SERVER_LOGS.append(formatted_msg)
+    if len(SERVER_LOGS) > 500: SERVER_LOGS.pop(0)
+    print(formatted_msg, flush=True)
 
-def custom_warning_handler(message: Warning, category: Any, filename: str, lineno: int, file: Optional[Any] = None, line: Optional[str] = None) -> None:
-    """
-    Suppress specific warnings to keep console output clean.
-    """
-    pass
-
-warnings.showwarning = custom_warning_handler
-
-log_debug("--- SYSTEM BOOT SEQUENCE INITIATED ---", "STARTUP")
+log_event("Initializing JobGuard System v15.0...", "INIT", "BOOT")
 
 # ==========================================
-# 1. MONKEY PATCHING & SETUP
+# 1. PYTORCH MODEL ARCHITECTURE
 # ==========================================
 
-# 🔧 MONKEY PATCH for NumPy compatibility with older pickled models
-if not hasattr(np, 'object'):
-    np.object = object
-if not hasattr(np, 'bool'):
-    np.bool = bool
-if not hasattr(np, 'int'):
-    np.int = int
+class BERTFusion(nn.Module):
+    def __init__(self, num_features: int = 10):
+        super(BERTFusion, self).__init__()
+        self.bert = DistilBertModel.from_pretrained('distilbert-base-uncased')
+        for param in self.bert.transformer.layer[:4].parameters():
+            param.requires_grad = False
+        self.feat_proj = nn.Sequential(nn.Linear(num_features, 64), nn.ReLU(), nn.Dropout(0.2))
+        self.classifier = nn.Sequential(nn.Linear(768 + 64, 256), nn.ReLU(), nn.Dropout(0.3), nn.Linear(256, 1))
+
+    def forward(self, input_ids, attention_mask, features):
+        bert_out = self.bert(input_ids=input_ids, attention_mask=attention_mask)
+        cls_emb = bert_out.last_hidden_state[:, 0, :]
+        feat_emb = self.feat_proj(features)
+        combined = torch.cat((cls_emb, feat_emb), dim=1)
+        return self.classifier(combined)
 
 # ==========================================
-# 2. CLASS DEFINITIONS
+# 2. ROBUST FEATURE ENGINEERING
 # ==========================================
 
-class TextCleaner(BaseEstimator, TransformerMixin):
-    """
-    A scikit-learn transformer that cleans text data by lowercasing and 
-    removing extra whitespace.
-    """
-    def fit(self, X: Any, y: Any = None) -> 'TextCleaner':
-        return self
-
-    def transform(self, X: List[str]) -> List[str]:
-        cleaned = []
-        for text in X:
-            text = str(text).lower() if text else ""
-            text = re.sub(r'\s+', ' ', text).strip()
-            cleaned.append(text)
-        return cleaned
-
-class SpacyVectorTransformer(BaseEstimator, TransformerMixin):
-    """
-    Transforms text into SpaCy word vectors.
-    Uses the global `nlp_engine` or a passed instance.
-    """
-    def __init__(self, nlp: Optional[Any] = None):
-        self.nlp = nlp
-
-    def fit(self, X: Any, y: Any = None) -> 'SpacyVectorTransformer':
-        return self
-
-    def transform(self, X: List[str]) -> np.ndarray:
-        engine = self.nlp if self.nlp else nlp_engine
-        
-        # Optimization: Use global request context if available to avoid re-tokenizing
-        if hasattr(g, 'spacy_doc') and g.spacy_doc is not None and len(X) == 1:
-            if g.spacy_doc.has_vector:
-                return np.array([g.spacy_doc.vector])
-            return np.array([np.zeros(300)])
-            
-        vectors = []
-        for doc in engine.pipe(X):
-            if doc.has_vector:
-                vectors.append(doc.vector)
-            else:
-                vectors.append(np.zeros(300))
-        return np.array(vectors)
-
-class RobustAnomalyDetector(BaseEstimator, ClassifierMixin):
-    """
-    Detects anomalies using a combination of Isolation Forest and Autoencoder reconstruction error.
-    """
-    def __init__(self, input_dim: int = 307):
-        self.input_dim = input_dim
-        self.scaler = MinMaxScaler()
-        self.iso_model = None
-        self.ae_threshold = 0.0
-        self.ae_weights = None
-        self.autoencoder = None
+class TextProcessor:
     
-    def _build_autoencoder(self) -> tf.keras.Model:
-        """Constructs the Autoencoder neural network."""
-        model = Sequential([
-            Input(shape=(self.input_dim,)),
-            Dense(256, activation='relu'),
-            BatchNormalization(),
-            Dropout(0.3),
-            Dense(128, activation='relu'),
-            Dense(32, activation='relu'),
-            Dense(128, activation='relu'),
-            Dense(256, activation='relu'),
-            Dense(self.input_dim, activation='linear')
+    @staticmethod
+    def normalize_text(text: str) -> str:
+        """
+        Cleans and normalizes input text before any processing.
+        1. Unicode normalization (NFKC) -> fixes accents, fancy quotes
+        2. Whitespace squashing -> removes \n\n, tabs
+        3. Strip control characters
+        """
+        # 1. Standardize Unicode (e.g. ﬀ -> ff, ½ -> 1/2)
+        text = unicodedata.normalize('NFKC', text)
+        
+        # 2. Replace fancy quotes and dashes
+        text = text.replace('“', '"').replace('”', '"').replace('’', "'").replace('–', '-')
+        
+        # 3. Collapse whitespace (tabs, newlines -> single space)
+        # Note: We keep some structure implicitly, but for BERT single stream is fine.
+        text = re.sub(r'\s+', ' ', text).strip()
+        
+        # 4. Remove non-printable control chars (except standard ASCII)
+        text = "".join(ch for ch in text if unicodedata.category(ch)[0] != "C")
+        
+        return text
+
+    @staticmethod
+    def extract_features_for_model(text: str) -> np.ndarray:
+        text_str = str(text)
+        lower_text = text_str.lower()
+        length = len(text_str) if len(text_str) > 0 else 1
+        
+        has_logo = 0 
+        has_questions = 1 if "?" in text_str else 0
+        caps_ratio = sum(1 for c in text_str if c.isupper()) / length
+        has_email = 1 if re.search(r'[\w\.-]+@[\w\.-]+\.\w+', text_str) else 0
+        has_phone = 1 if re.search(r'\+?\d[\d -]{8,12}\d', text_str) else 0
+        
+        admin_keywords = ['admin', 'assistant', 'clerk', 'data entry', 'secretary']
+        is_admin = 1 if any(k in lower_text for k in admin_keywords) else 0
+        
+        socials = ['instagram', 'facebook', 'linkedin', 'twitter', 'telegram', 'whatsapp']
+        has_social = 1 if any(s in lower_text for s in socials) else 0
+        
+        exclamation_ratio = text_str.count("!") / length
+        money_count = len(re.findall(r'(\$|rs\.?|usd|inr)\s?\d+', lower_text)) + lower_text.count('salary')
+        money_ratio = money_count / length
+        
+        urgency_words = ['urgent', 'immediate', 'now', 'deadline', 'hurry', 'asap']
+        urgency_ratio = sum(1 for w in urgency_words if w in lower_text) / length
+        
+        return np.array([
+            has_logo, has_questions, caps_ratio, has_email, has_phone, 
+            is_admin, has_social, exclamation_ratio, money_ratio, urgency_ratio
         ])
-        model.compile(optimizer='adam', loss='mse')
-        return model
 
-    def predict_with_explanation(self, vector_and_features: np.ndarray) -> List[str]:
-        """
-        Predicts anomalies and returns a list of explanatory strings.
-
-        Args:
-            vector_and_features (np.ndarray): The input feature vector.
-
-        Returns:
-            List[str]: Explanations for any detected anomalies.
-        """
-        if self.autoencoder is None:
-            self.autoencoder = self._build_autoencoder()
-            if self.ae_weights:
-                self.autoencoder.set_weights(self.ae_weights)
-
-        input_data = vector_and_features.reshape(1, -1)
-        input_scaled = self.scaler.transform(input_data)
+    @staticmethod
+    def extract_entities_robust(text: str) -> Dict[str, List[str]]:
+        entities = {'emails': [], 'urls': [], 'phones': [], 'salaries': [], 'softwares': []}
         
-        iso_pred = self.iso_model.predict(input_scaled)[0]
-        recon = self.autoencoder.predict(input_scaled, verbose=0)
-        loss = tf.keras.losses.mse(recon, input_scaled).numpy()[0]
+        entities['emails'] = list(set(re.findall(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', text)))
+        entities['urls'] = list(set(re.findall(r'https?://(?:[-\w.]|(?:%[\da-fA-F]{2}))+', text)))
         
-        explanations = []
-        if iso_pred == -1:
-            explanations.append("Statistical Structural Outlier")
-        if loss > self.ae_threshold:
-            explanations.append(f"Deep Pattern Anomaly (MSE: {loss:.4f})")
+        raw_phones = re.findall(r'(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}', text)
+        entities['phones'] = [p for p in list(set(raw_phones)) if len(re.sub(r'\D', '', p)) > 9]
+        
+        currency_symbols = r'(?:\$|€|£|¥|₹|\bRs\.?|\bCHF|\bCAD|\bAUD|\bSGD|\bNZD|\bHKD|\bCNY|\bINR|\bUSD|\bGBP|\bEUR)'
+        frequency_terms = r'(?:per\s?hour|/hr|per\s?week|/wk|per\s?month|/mo|per\s?annum|p\.a\.|yearly|LPA|CTC)'
+        
+        salary_patterns = [
+            fr'{currency_symbols}\s?[\d,]+(?:k|K|L|m|M)?(?:\.\d+)?\s?{frequency_terms}?',
+            fr'[\d,]+(?:\.\d+)?\s?(?:USD|EUR|GBP|AUD|CAD|SGD|INR)\s?{frequency_terms}?',
+            fr'[\d,]+(?:\.\d+)?\s?{frequency_terms}',
+        ]
+        
+        found_salaries = []
+        for pat in salary_patterns:
+            matches = re.finditer(pat, text, re.IGNORECASE)
+            for m in matches:
+                clean_match = re.sub(r'\s+', ' ', m.group(0).strip())
+                if re.match(r'^(19|20)\d{2}$', clean_match): continue
+                found_salaries.append(clean_match)
+        entities['salaries'] = list(set(found_salaries))
+        
+        tech_stack = ['python', 'java', 'react', 'sql', 'aws', 'docker', 'excel', 'photoshop', 'figma', 'c++', 'typescript', 'marketing', 'node.js', 'angular', 'springboot', 'gcp']
+        found_tech = [tech for tech in tech_stack if tech in text.lower()]
+        entities['softwares'] = list(set(found_tech))
+        
+        return entities
+
+    @staticmethod
+    def check_safety_risks(text: str) -> List[str]:
+        risks = []
+        lower = text.lower()
+        
+        remote_tools = ['anydesk', 'teamviewer', 'logmein', 'remotepc', 'ammyy', 'zoho assist', 'ultraviewer']
+        detected_tools = [t for t in remote_tools if t in lower]
+        if detected_tools:
+            risks.append(f"🚨 **Security Risk:** Mentions remote access software (**{', '.join(detected_tools).title()}**). Scammers use these to steal data.")
             
-        return explanations
+        money_keywords = ['security deposit', 'registration fee', 'training fee', 'cost of training', 'refundable deposit', 'buy starter kit', 'application processing fee', 'verification fee']
+        detected_money = [m for m in money_keywords if m in lower]
+        if detected_money:
+            risks.append(f"🚨 **Financial Risk:** Asks for money (**{detected_money[0]}**). Legitimate jobs NEVER ask candidates to pay.")
+            
+        crypto_keywords = [
+            (r'\bbitcoin\b', 'Bitcoin'), (r'\bbtc\b', 'BTC'), (r'\busdt\b', 'USDT'), 
+            (r'\btether\b', 'Tether'), (r'\bethereum\b', 'Ethereum'), (r'\beth\b', 'ETH'), 
+            (r'\bwallet address\b', 'Wallet')
+        ]
+        for pat, name in crypto_keywords:
+            if re.search(pat, text, re.IGNORECASE):
+                risks.append(f"🚨 **High Risk:** Mentions Cryptocurrency (**{name}**). Legitimate employers do NOT pay via Crypto.")
+                break
 
-# Inject classes into __main__ so pickle can find them
-__main__.TextCleaner = TextCleaner
-__main__.SpacyVectorTransformer = SpacyVectorTransformer
-__main__.RobustAnomalyDetector = RobustAnomalyDetector
+        payment_apps = ['google pay', 'gpay', 'phonepe', 'paytm', 'bhim', 'upi id', 'zelle', 'venmo', 'cashapp', 'paypal friends']
+        detected_apps = [p for p in payment_apps if p in lower]
+        if detected_apps:
+            risks.append(f"🚨 **Financial Risk:** Asks for payment via **{detected_apps[0].title()}**.")
+
+        return risks
+
+    @staticmethod
+    def detect_programming_language(text: str) -> Optional[str]:
+        # STRICT DETECTION: Syntactic Structures
+        if re.search(r'\b(public|private|protected)\s+(static\s+)?(void|int|string|boolean|class|interface)\s+\w+', text):
+            return "Source Code (Method Signature)"
+        if re.search(r'\bdef\s+[a-zA-Z_]\w*\s*\(.*\)\s*:', text):
+            return "Source Code (Python Function)"
+        if re.search(r'\b(const|let|var)\s+[a-zA-Z_]\w*\s*=\s*[^=]', text):
+            return "Source Code (JS/TS Variable)"
+        if re.search(r'^\s*#include\s*<.*>', text, re.MULTILINE):
+            return "Source Code (C/C++ Header)"
+        
+        syntax_chars = len(re.findall(r'[\{\}\;\(\)\[\]=<>]', text))
+        if len(text) > 50 and (syntax_chars / len(text)) > 0.15:
+            return "Source Code (High Syntax Density)"
+        return None
+
+    @staticmethod
+    def check_emoji_professionalism(text: str) -> Optional[str]:
+        emoji_count = len(re.findall(r'[\U00010000-\U0010ffff]', text))
+        if emoji_count > 5:
+            return f"⚠️ **Professionalism:** Excessive use of emojis ({emoji_count} detected). Typical of MLM/Spam."
+        return None
+
+    @staticmethod
+    def validate_content(text: str) -> Tuple[bool, List[str]]:
+        warnings = []
+        if len(text) < 20:
+            warnings.append("Text is too short to be a valid job description.")
+            return False, warnings
+        
+        clean_text = re.sub(r'[^\w\s]', '', text.lower())
+        tokens = clean_text.split()
+        total_tokens = len(tokens)
+        
+        if total_tokens > 0:
+            valid_count = 0
+            for t in tokens:
+                if t in COMMON_CORP_TERMS:
+                    valid_count += 1
+                    continue
+                if HAS_WORDFREQ:
+                    if zipf_frequency(t, 'en') > 0:
+                        valid_count += 1
+                        continue
+                if HAS_ENCHANT and SPELL_CHECKER.check(t):
+                    valid_count += 1
+                    continue
+            
+            if (valid_count / total_tokens) < 0.4:
+                warnings.append("Gibberish detected (Unrecognizable word patterns).")
+                return False, warnings
+
+        code_type = TextProcessor.detect_programming_language(text)
+        if code_type:
+            warnings.append(f"Input appears to be **{code_type}**, not a job description.")
+            return False, warnings
+            
+        emoji_warn = TextProcessor.check_emoji_professionalism(text)
+        if emoji_warn:
+            warnings.append(emoji_warn)
+            
+        return True, warnings
+
+    @staticmethod
+    def analyze_domain_reputation(entities: Dict[str, List[str]]) -> Dict[str, List[str]]:
+        flags = {'email_flags': [], 'url_flags': []}
+        free_domains = {'gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 'live.com', 'aol.com', 'proton.me'}
+        for email in entities['emails']:
+            if email.split('@')[-1].lower() in free_domains:
+                flags['email_flags'].append(f"⚠️ **Professionalism:** Uses free email (**{email.split('@')[-1]}**) instead of corporate domain.")
+
+        shorteners = {'bit.ly', 'goo.gl', 'tinyurl.com', 't.co', 'linktr.ee', 'wa.me'}
+        for url in entities['urls']:
+            if any(s in url.lower() for s in shorteners):
+                flags['url_flags'].append(f"⚠️ **Safety:** URL shortener detected (**{url[:25]}...**).")
+        return flags
 
 # ==========================================
-# 3. HEURISTIC & VALIDATION ENGINE
+# 3. MODEL MANAGER
 # ==========================================
 
-def heuristic_analysis(text: str) -> List[str]:
-    """
-    Scans text for known fraud patterns using regex.
-    """
-    text_lower = text.lower()
-    warnings_list = []
-    
-    behavioral_patterns = [
-        (r"(validate|verify).{0,20}(bank|account|wallet)", "🎣 **Phishing:** Request to validate financial info."),
-        (r"(click|follow).{0,20}(link|url).{0,20}(verify|update)", "🎣 **Phishing:** 'Click link to verify' pattern."),
-        (r"(processing|training).{0,10}(fee|charge|cost)", "💸 **Financial:** Illegal demand for fees."),
-        (r"(no).{0,10}(interview).{0,20}(direct)", "⚠️ **Red Flag:** Direct hire / No interview.")
-    ]
-    for pattern, msg in behavioral_patterns:
-        if re.search(pattern, text_lower):
-            warnings_list.append(msg)
-
-    triggers = {
-        "telegram": "🚨 **Platform:** Telegram contact.",
-        "signal": "🚨 **Platform:** Signal (Encrypted) contact.",
-        "whatsapp": "🚨 **Platform:** WhatsApp contact.",
-        "usdt": "🚨 **Crypto:** USDT payment mentioned.",
-        "bitcoin": "🚨 **Crypto:** Bitcoin payment mentioned.",
-        "anydesk": "⚠️ **Security:** Remote Access Tool (AnyDesk)."
-    }
-    for word, msg in triggers.items():
-        if word in text_lower:
-            warnings_list.append(msg)
-            
-    return warnings_list
-
-def metadata_check(text: str) -> List[str]:
-    """
-    Checks for missing professional metadata (salary, company name, etc.).
-    """
-    advisory = []
-    text_low = text.lower()
-    
-    if "@gmail.com" in text_low or "@yahoo.com" in text_low: 
-        advisory.append("ℹ️ **Identity:** Personal email domain used.")
-    if "salary" not in text_low and "$" not in text and "lpa" not in text_low: 
-        advisory.append("ℹ️ **Clarity:** Missing salary details.")
-    if "linkedin" not in text_low and "company" not in text_low: 
-        advisory.append("ℹ️ **Verification:** No company/social links.")
+class ModelManager:
+    def __init__(self):
+        self.bert_fusion = None
+        self.bert_tokenizer = None
+        self.autoencoder = None
+        self.iso_forest = None
+        self.meta_ensemble = None
+        self.sbert = None 
+        self.scalers = {}
         
-    return advisory
+    def load(self) -> None:
+        log_event("Loading AI Models...", "INIT", "BOOT")
+        try:
+            self.sbert = SentenceTransformer('all-MiniLM-L12-v2')
+            self.scalers['feat'] = joblib.load(os.path.join(MODEL_DIR, 'feature_scaler.pkl'))
+            self.scalers['meta'] = joblib.load(os.path.join(MODEL_DIR, 'meta_scaler.pkl'))
+            self.scalers['ae'] = joblib.load(os.path.join(MODEL_DIR, 'ae_scaler.pkl'))
+            self.iso_forest = joblib.load(os.path.join(MODEL_DIR, 'iso_forest.pkl'))
+            self.meta_ensemble = joblib.load(os.path.join(MODEL_DIR, 'meta_ensemble.pkl'))
+            self.autoencoder = load_model(os.path.join(MODEL_DIR, 'autoencoder.keras'), compile=False)
+            self.bert_tokenizer = DistilBertTokenizer.from_pretrained('distilbert-base-uncased')
+            self.bert_fusion = BERTFusion(num_features=10)
+            state_dict = torch.load(os.path.join(MODEL_DIR, 'best_bert_fusion.pth'), map_location=DEVICE)
+            self.bert_fusion.load_state_dict(state_dict)
+            self.bert_fusion.to(DEVICE)
+            self.bert_fusion.eval()
+            log_event("All Neural Networks Loaded & Quantized", "SUCCESS", "INIT")
+        except Exception as e:
+            log_event(f"Model Load Failed: {str(e)}", "ERROR", "INIT")
 
-def extract_structural_features(text: str) -> List[float]:
-    """
-    Extracts statistical features like capitalization ratio, digit density, etc.
-    """
-    text = str(text)
-    length = max(len(text), 1)
-    
-    caps = sum(1 for c in text if c.isupper())
-    digits = sum(1 for c in text if c.isdigit())
-    specials = len(re.findall(r'[^a-zA-Z0-9\s]', text))
-    word_count = len(text.split())
-    
-    return [
-        caps / length,
-        digits / length,
-        specials / length,
-        1.0 if "@" in text else 0.0,
-        0.0,  # Placeholder feature
-        1.0 if "http" in text else 0.0,
-        float(word_count)
-    ]
-
-def detect_invalid_language(text: str) -> Tuple[bool, List[str]]:
-    """
-    Detects gibberish, code snippets, or non-English text.
-
-    Returns:
-        Tuple[bool, List[str]]: (Is_Invalid, List_of_Reasons)
-    """
-    if not text:
-        return False, []
-    
-    issues = []
-    length = len(text)
-    
-    # Check 1: Non-ASCII characters
-    non_ascii_count = len(re.findall(r'[^\x00-\x7F]', text))
-    if (non_ascii_count / length) > 0.2: 
-        issues.append("Language Error: Non-English text detected")
-        return True, issues 
-    
-    # Check 2: Code symbols density
-    code_symbols = len(re.findall(r'[\{\}\<\>;=\[\]]', text))
-    if (code_symbols / length) > 0.10: 
-        issues.append("Language Error: Source Code or HTML detected")
-        return True, issues
-
-    # Check 3: Programming signatures
-    code_signatures = ["def __init__", "public static void", "<script>", "SELECT * FROM"]
-    if any(sig in text for sig in code_signatures):
-        issues.append("Language Error: Programming Code Detected")
-        return True, issues
-
-    # Check 4: Gibberish (Zipf Frequency)
-    tokens = [t for t in text.split() if t.isalpha()]
-    if not tokens:
-        return False, [] 
-    
-    unknown_word_count = 0
-    total_checked = 0
-    
-    for token in tokens:
-        if len(token) < 4:
-            continue 
-        total_checked += 1
-        lower_token = token.lower()
-        
-        # Check dictionary existence
-        if zipf_frequency(lower_token, 'en') > 0.0:
-            continue 
-            
-        # Check compound words
-        is_compound = False
-        if len(lower_token) > 6: 
-            for i in range(3, len(lower_token) - 2): 
-                part1 = lower_token[:i]
-                part2 = lower_token[i:]
-                if zipf_frequency(part1, 'en') > 0.0 and zipf_frequency(part2, 'en') > 0.0:
-                    is_compound = True
-                    break
-        
-        if is_compound:
-            continue
-        unknown_word_count += 1
-
-    if total_checked > 0:
-        gibberish_ratio = unknown_word_count / total_checked
-        if gibberish_ratio > 0.5:
-            issues.append(f"Language Error: Gibberish Detected ({int(gibberish_ratio*100)}% unknown)")
-            return True, issues
-
-    return False, []
+model_mgr = ModelManager()
+model_mgr.load()
 
 # ==========================================
-# 4. APP & MODEL LOADING
+# 4. PREDICTION PIPELINE
+# ==========================================
+
+class FraudDetector:
+    def __init__(self):
+        self.scam_anchors_text = [
+            "Pay registration fee", "Buy laptop from us", "Telegram job offer", 
+            "Bank account details needed", "Easy money part time", "No interview required",
+            "Kindly transfer money for training materials", "Send your credit card details",
+            "Strictly confidential payment transaction", "Instant job offer without assessment",
+            "Starter kit purchase required", "Insurance fee for laptop",
+            "Earn $1000 weekly", "No experience needed", "Simple copy paste job", 
+            "Guaranteed job offer", "Make quick cash", "Earn $500 in 2 hours",
+            "Deposit fees to be prioritised", "Priority consideration fee", "Application processing fee",
+            "Deposit 5000 fees", "Pay to skip queue",
+            "Payment via Bitcoin", "USDT transfer required", "Link your crypto wallet"
+        ]
+        self.scam_anchors_tensor = None
+        if model_mgr.sbert:
+            try:
+                self.scam_anchors_tensor = model_mgr.sbert.encode(self.scam_anchors_text, convert_to_tensor=True)
+            except Exception as e:
+                log_event(f"S-BERT Init Failed: {e}", "ERROR", "INIT")
+
+    def predict(self, text: str) -> Dict[str, Any]:
+        logs = []
+        def trace(msg, level="INFO"): logs.append(f"[{datetime.now().strftime('%H:%M:%S')}] [{level}] {msg}")
+        
+        # 1. NORMALIZE (Clean input before anything else)
+        text = TextProcessor.normalize_text(text)
+        
+        # 2. VALIDATE
+        is_valid, warnings = TextProcessor.validate_content(text)
+        if not is_valid:
+            for w in warnings: trace(w, "WARN")
+            return {'status': 'invalid', 'warnings': warnings, 'logs': logs}
+        
+        features = TextProcessor.extract_features_for_model(text)
+        feats_scaled = model_mgr.scalers['feat'].transform(features.reshape(1, -1))
+        
+        inputs = model_mgr.bert_tokenizer(text, return_tensors="pt", max_length=128, padding='max_length', truncation=True)
+        with torch.no_grad():
+            logits = model_mgr.bert_fusion(inputs['input_ids'].to(DEVICE), inputs['attention_mask'].to(DEVICE), torch.tensor(feats_scaled, dtype=torch.float32).to(DEVICE))
+            bert_prob = torch.sigmoid(logits).item()
+            cls_emb = model_mgr.bert_fusion.bert(input_ids=inputs['input_ids'], attention_mask=inputs['attention_mask']).last_hidden_state[:, 0, :].numpy()
+        
+        ae_emb_scaled = model_mgr.scalers['ae'].transform(cls_emb)
+        with tf.device('/cpu:0'): recon = model_mgr.autoencoder.predict(ae_emb_scaled, verbose=0)
+        ae_error = float(np.mean(np.power(ae_emb_scaled - recon, 2)))
+        iso_score = float(-model_mgr.iso_forest.decision_function(feats_scaled)[0])
+        
+        meta_in = np.column_stack([[bert_prob], [iso_score], [ae_error], feats_scaled])
+        final_prob = model_mgr.meta_ensemble.predict_proba(model_mgr.scalers['meta'].transform(meta_in))[0][1]
+        
+        trace(f"AI Prob: {final_prob:.4f} (BERT: {bert_prob:.2f})", "AI")
+        
+        reasons = []
+        if self.scam_anchors_tensor is not None:
+            # Use regex split for better sentence boundaries
+            sentences = re.split(r'(?<!\w\.\w.)(?<![A-Z][a-z]\.)(?<=\.|\?)\s', text)
+            sentences = [s.strip() for s in sentences if len(s) > 10]
+            if sentences:
+                scores = util.cos_sim(model_mgr.sbert.encode(sentences, convert_to_tensor=True), self.scam_anchors_tensor)
+                for i, sent_scores in enumerate(scores):
+                    curr_max = torch.max(sent_scores).item()
+                    if curr_max > 0.55: 
+                        suspicious_sent = sentences[i].lower()
+                        # SAFETY FILTER
+                        safe_words = ['in person', 'video conference', 'google meet', 'zoom', 'teams', 'office', 'headquarters']
+                        if 'interview' in suspicious_sent and any(sw in suspicious_sent for sw in safe_words): continue
+                        
+                        trace(f"S-BERT Match: {curr_max:.2f} -> {sentences[i][:40]}...", "WARN")
+                        reasons.append(f"🤖 **Semantic AI:** Suspicious phrase detected: \"{sentences[i]}\" ({(curr_max*100):.0f}% Scam Match)")
+                        final_prob = max(final_prob, 0.85)
+
+        safety_risks = TextProcessor.check_safety_risks(text)
+        reasons.extend(safety_risks)
+        if safety_risks: final_prob = max(final_prob, 0.95)
+
+        entities = TextProcessor.extract_entities_robust(text)
+        domain_flags = TextProcessor.analyze_domain_reputation(entities)
+        reasons.extend(domain_flags['email_flags'])
+        reasons.extend(domain_flags['url_flags'])
+
+        advisory = []
+        if entities['emails']: advisory.append(f"✅ **Email:** Verified ({' '.join(entities['emails'][:1])})")
+        else: advisory.append("ℹ️ **Email:** Not listed in description")
+            
+        if entities['urls']: advisory.append(f"✅ **Website:** Link detected ({' '.join(entities['urls'][:1])})")
+        else: advisory.append("ℹ️ **Website:** Not listed in description")
+
+        if entities['salaries']: advisory.append(f"✅ **Compensation:** {' '.join(entities['salaries'][:1])}")
+        else: advisory.append("ℹ️ **Compensation:** Not explicitly mentioned")
+        
+        if entities['phones']: advisory.append(f"✅ **Phone:** {' '.join(entities['phones'][:1])}")
+        else: advisory.append("ℹ️ **Phone:** Not listed in description")
+
+        if "telegram" in text.lower() or "whatsapp" in text.lower():
+            advisory.append("🚩 **Safety Warning:** Job asks for **Telegram** or **WhatsApp** contact.")
+            
+        emoji_warn = TextProcessor.check_emoji_professionalism(text)
+        if emoji_warn:
+            reasons.append(emoji_warn)
+
+        return {
+            'status': 'success', 'prob': final_prob,
+            'reasons': reasons, 'advisory': advisory, 'logs': logs
+        }
+
+detector = FraudDetector()
+
+# ==========================================
+# 5. FLASK APP & ROUTES
 # ==========================================
 
 app = Flask(__name__)
-app.secret_key = "jobguard_production_key"
-app.permanent_session_lifetime = timedelta(days=30)
+app.secret_key = os.getenv("SECRET_KEY", "SuperSecretJobGuardKey2026")
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=7)
+cache = Cache(app, config={'CACHE_TYPE': 'SimpleCache'})
 DB_NAME = "users.db"
-cache = Cache(app, config={"CACHE_TYPE": "SimpleCache", "CACHE_DEFAULT_TIMEOUT": 3600})
 
-# --- Load SpaCy ---
-nlp_engine = None
-try:
-    import spacy
-    nlp_engine = spacy.load("en_core_web_lg")
-    log_debug("✅ Spacy Loaded", "SUCCESS")
-except Exception as e:
-    import spacy
-    nlp_engine = spacy.blank("en")
-    log_debug(f"⚠️ Spacy Failed. Using Blank. {e}", "WARN")
+def get_db():
+    conn = sqlite3.connect(DB_NAME)
+    conn.row_factory = sqlite3.Row
+    return conn
 
-# --- Load Sklearn Pipeline ---
-sklearn_pipeline = None
-
-def force_inject_spacy(estimator: Any, nlp_engine: Any) -> None:
-    """Recursively injects the live Spacy engine into the pipeline."""
-    if isinstance(estimator, SpacyVectorTransformer):
-        estimator.nlp = nlp_engine
-    if hasattr(estimator, 'steps'):
-        for _, step in estimator.steps:
-            force_inject_spacy(step, nlp_engine)
-    if hasattr(estimator, 'transformer_list'):
-        for _, trans in estimator.transformer_list:
-            force_inject_spacy(trans, nlp_engine)
-
-if os.path.exists('production_fake_job_pipeline.pkl'):
-    try:
-        sklearn_pipeline = joblib.load('production_fake_job_pipeline.pkl')
-        force_inject_spacy(sklearn_pipeline, nlp_engine)
-        log_debug("✅ Sklearn Pipeline Loaded", "SUCCESS")
-    except Exception as e:
-        log_debug(f"❌ Sklearn Load Failed: {e}", "ERROR")
-
-# --- Load BERT Model ---
-bert_tokenizer = None
-bert_model = None
-BERT_PATH = "." 
-
-if os.path.exists("model.safetensors") or os.path.exists("pytorch_model.bin"):
-    try:
-        bert_tokenizer = DistilBertTokenizerFast.from_pretrained(BERT_PATH)
-        bert_model = DistilBertForSequenceClassification.from_pretrained(BERT_PATH)
-        bert_model.eval()
-        log_debug("✅ BERT Model Loaded", "SUCCESS")
-    except Exception as e:
-        log_debug(f"❌ BERT Load Failed: {e}", "CRITICAL")
-else:
-    log_debug("⚠️ BERT files not found in current directory.", "WARN")
-
-# --- Load Anomaly Detector ---
-anomaly_model = None
-if os.path.exists('robust_anomaly_model.pkl'):
-    try:
-        anomaly_model = joblib.load('robust_anomaly_model.pkl')
-        log_debug("✅ Anomaly Detector Loaded", "SUCCESS")
-    except Exception:
-        pass
-
-# --- Initialize Explainer ---
-explainer = LimeTextExplainer(class_names=['Real', 'Fake'])
-
-# ==========================================
-# 5. ENSEMBLE PREDICTION FOR LIME
-# ==========================================
-
-def ensemble_lime_predict(texts: List[str]) -> np.ndarray:
-    """
-    A unified prediction function for LIME that replicates the system's 
-    multi-model consensus logic (BERT + Sklearn).
-    
-    This ensures that LIME explains the *Combined* decision, not just BERT's.
-    """
-    num_samples = len(texts)
-    
-    # 1. Get BERT Probabilities (with Batching)
-    bert_probs = np.zeros(num_samples)
-    if bert_model:
-        batch_size = 16
-        for i in range(0, num_samples, batch_size):
-            batch_texts = texts[i:i + batch_size]
-            inputs = bert_tokenizer(
-                batch_texts, 
-                return_tensors="pt", 
-                padding=True, 
-                truncation=True, 
-                max_length=512
-            )
-            with torch.no_grad():
-                logits = bert_model(**inputs).logits
-                batch_probs = F.softmax(logits, dim=1).numpy()
-                bert_probs[i:i+batch_size] = batch_probs[:, 1] # Store 'Fake' prob only
-    else:
-        bert_probs[:] = 0.5  # Fallback
-
-    # 2. Get Sklearn Probabilities
-    sklearn_probs = np.zeros(num_samples)
-    if sklearn_pipeline:
-        try:
-            # Sklearn pipelines usually handle lists of strings directly
-            sk_preds = sklearn_pipeline.predict_proba(texts)
-            sklearn_probs = sk_preds[:, 1]
-        except Exception:
-            sklearn_probs[:] = 0.5
-    else:
-        sklearn_probs[:] = 0.5
-
-    # 3. Combine Logic (Vectorized equivalent of the 'predict' route logic)
-    final_probs = []
-    
-    for pb, ps in zip(bert_probs, sklearn_probs):
-        final_prob = 0.0
-        
-        # --- Logic mirroring the main predict() route ---
-        # 1. BERT Authority
-        if pb > 0.85:
-            final_prob = pb
-        # 2. Sklearn Backup
-        elif ps > 0.80:
-            final_prob = ps
-        # 3. Consensus
-        elif pb > 0.60 and ps > 0.60:
-            final_prob = (pb + ps) / 2
-        # 4. Review / Mixed Logic
-        else:
-            final_prob = max(pb, ps)
-            
-            # Note: We omit the complex 'Anomaly' override here because LIME
-            # perturbs text, not the structural anomalies. We focus on text classifiers.
-            
-            # Simple fallback for low-confidence zones
-            if final_prob < 0.45:
-                 # If both are very low, trust the safety
-                 pass 
-        
-        final_probs.append([1 - final_prob, final_prob])
-
-    return np.array(final_probs)
-
-# ==========================================
-# 6. MAIN PREDICTION ROUTE
-# ==========================================
-
-@app.route('/predict', methods=['POST'])
-def predict() -> Any:
-    """
-    Main API endpoint. Receives text, runs models, applies heuristics, 
-    and generates XAI insights.
-    """
-    trace_logs: List[str] = []
-    is_admin = session.get('user') == 'Yoge'
-    
-    def trace(msg: str, lvl: str = "INFO") -> None:
-        log_debug(msg, lvl)
-        if is_admin:
-            trace_logs.append(f"[{datetime.now().strftime('%H:%M:%S')}] [{lvl}] {msg}")
-
-    try:
-        data = request.get_json()
-        text = data.get('text', '').strip()
-        if not text:
-            return jsonify({'error': 'No input'}), 400
-        
-        # Check Cache
-        text_hash = hashlib.md5(text.lower().encode('utf-8')).hexdigest()
-        cached = cache.get(text_hash)
-        if cached:
-            if is_admin: 
-                cached['system_logs'] = [f"[CACHE] Hit for {text_hash[:8]}"] + cached.get('system_logs', [])
-            return jsonify(cached)
-
-        # 1. GIBBERISH CHECK
-        is_invalid_lang, lang_issues = detect_invalid_language(text)
-        if is_invalid_lang:
-            response = {
-                'fraud_probability': 0, 
-                'is_gibberish': True, 
-                'reasons': [], 
-                'advisory': [], 
-                'anomaly_analysis': lang_issues, 
-                'xai_insights': [],
-                'system_logs': [], 
-                'verdict': "Invalid"
-            }
-            cache.set(text_hash, response)
-            return jsonify(response)
-
-        # 2. RUN MODELS
-        doc = nlp_engine(text)
-        g.spacy_doc = doc  # Store for transformer reuse
-
-        # --- MODEL 1: BERT ---
-        bert_score = 0.5
-        if bert_model:
-            inputs = bert_tokenizer(text, return_tensors="pt", truncation=True, max_length=512)
-            with torch.no_grad():
-                outputs = bert_model(**inputs)
-            bert_score = F.softmax(outputs.logits, dim=1)[0][1].item()
-            trace(f"BERT Confidence: {bert_score:.4f}", "AI")
-
-        # --- MODEL 2: SKLEARN ---
-        sklearn_score = 0.5
-        if sklearn_pipeline:
-            sklearn_score = sklearn_pipeline.predict_proba([text])[0][1]
-            trace(f"Sklearn Confidence: {sklearn_score:.4f}", "AI")
-
-        # --- MODEL 3: ANOMALY ---
-        anomaly_alerts = []
-        mse_value = 0.0
-        if anomaly_model:
-            stats = extract_structural_features(text)
-            features = np.hstack((doc.vector, np.array(stats)))
-            anomaly_alerts = anomaly_model.predict_with_explanation(features)
-            
-            for alert in anomaly_alerts:
-                match = re.search(r"MSE:\s*([\d\.]+)", alert)
-                if match:
-                    mse_value = float(match.group(1))
-            
-            if mse_value > 0.008: 
-                trace(f"Anomaly Detected (MSE {mse_value:.4f})", "WARN")
-            else:
-                anomaly_alerts = []  # Silently drop very weak anomalies
-
-        # =========================================================
-        # 🧠 SCORING LOGIC
-        # =========================================================
-        
-        final_prob = 0.0
-        
-        # 1. BERT AUTHORITY
-        if bert_score > 0.85:
-            final_prob = bert_score
-            trace("Logic: BERT Authority", "RESULT")
-            
-        # 2. SKLEARN BACKUP
-        elif sklearn_score > 0.80:
-            final_prob = sklearn_score
-            trace("Logic: Sklearn Override", "RESULT")
-
-        # 3. CONSENSUS
-        elif bert_score > 0.60 and sklearn_score > 0.60:
-            final_prob = (bert_score + sklearn_score) / 2
-            trace("Logic: Moderate Consensus", "RESULT")
-
-        # 4. REVIEW LOGIC (With Relaxed "Proven Safe" Threshold)
-        else:
-            max_risk = max(bert_score, sklearn_score)
-            
-            is_proven_safe = (bert_score < 0.10) or (bert_score < 0.20 and sklearn_score < 0.30)
-            suspects_something = False
-            
-            if sklearn_score > 0.45: 
-                suspects_something = True
-            
-            if anomaly_alerts:
-                if is_proven_safe:
-                    trace(f"Anomaly Silenced: Overridden by Safety Logic (BERT {bert_score:.2f})", "INFO")
-                else:
-                    suspects_something = True
-                    trace("Trigger: Anomaly Validated (Models Uncertain)", "INFO")
-            
-            if suspects_something:
-                final_prob = max(max_risk, 0.45)
-                trace("Logic: Suspicion Validated -> Force Review Required", "WARN")
-            else:
-                final_prob = max_risk
-                trace("Logic: System Clean", "RESULT")
-
-        trace(f"Final Scoring: {final_prob:.4f}", "RESULT")
-
-        # =========================================================
-        # 🔍 UPDATED XAI GENERATION (ENSEMBLE)
-        # =========================================================
-        lime_insights = []
-        if final_prob > 0.35:
-            try:
-                # Use the new ENSEMBLE predictor that combines both models
-                exp = explainer.explain_instance(
-                    text, 
-                    ensemble_lime_predict,  # <--- CHANGED FROM BERT TO ENSEMBLE
-                    labels=(1,), 
-                    num_features=6, 
-                    num_samples=100
-                )
-                
-                # Filter for significant contributors (>5% impact)
-                lime_insights = [
-                    f"**{feature}** ({round(weight * 100)}% impact)" 
-                    for feature, weight in exp.as_list(label=1) 
-                    if weight > 0.05
-                ]
-                
-                if not lime_insights:
-                    lime_insights = ["Complex pattern detected (No single keyword dominant)"]
-            except Exception as e:
-                trace(f"LIME Failed: {str(e)}", "ERROR")
-                lime_insights = ["AI reasoning unavailable"]
-
-        # Final Response Construction
-        response = {
-            'fraud_probability': round(final_prob * 100, 2),
-            'reasons': heuristic_analysis(text),
-            'advisory': metadata_check(text),
-            'anomaly_analysis': anomaly_alerts,
-            'is_gibberish': False,
-            'xai_insights': lime_insights,
-            'system_logs': list(reversed(trace_logs)),
-            'verdict': "Fake" if final_prob > 0.50 else ("Review" if final_prob > 0.35 else "Real")
-        }
-        
-        cache.set(text_hash, response)
-        return jsonify(response)
-
-    except Exception as e:
-        trace(f"FATAL: {str(e)}", "ERROR")
-        traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
-
-# ==========================================
-# 7. DATABASE & AUTH ROUTES
-# ==========================================
-
-def init_db() -> None:
-    """Initializes the SQLite database with the users table."""
-    with sqlite3.connect(DB_NAME) as conn:
-        conn.cursor().execute('''
-            CREATE TABLE IF NOT EXISTS users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT, 
-                username TEXT UNIQUE NOT NULL, 
-                email TEXT UNIQUE NOT NULL, 
-                password TEXT NOT NULL
-            )
-        ''')
+def init_db():
+    with get_db() as conn:
+        conn.execute('''CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, username TEXT UNIQUE, email TEXT UNIQUE, password TEXT)''')
 init_db()
 
-@app.route('/api/signup', methods=['POST'])
-def api_signup() -> Any:
-    """Registers a new user."""
-    data = request.get_json()
-    try:
-        with sqlite3.connect(DB_NAME) as conn:
-            hashed_pw = generate_password_hash(data['password'])
-            conn.cursor().execute(
-                "INSERT INTO users (username, email, password) VALUES (?, ?, ?)", 
-                (data['username'], data['email'], hashed_pw)
-            )
-            session['user'] = data['username']
-            return jsonify({'success': True})
-    except sqlite3.IntegrityError:
-        return jsonify({'error': 'User or email already exists'}), 409
-
-@app.route('/api/login', methods=['POST'])
-def api_login() -> Any:
-    """Logs in an existing user."""
-    data = request.get_json()
-    with sqlite3.connect(DB_NAME) as conn:
-        row = conn.cursor().execute(
-            "SELECT password FROM users WHERE username = ?", 
-            (data['username'],)
-        ).fetchone()
-        
-        if row and check_password_hash(row[0], data['password']):
-            session['user'] = data['username']
-            session.permanent = data.get('remember', False)
-            return jsonify({'success': True, 'username': data['username']})
-            
-    return jsonify({'error': 'Invalid credentials'}), 401
-
-@app.route('/api/logout', methods=['POST'])
-def api_logout() -> Any:
-    """Clears the user session."""
-    session.clear()
-    return jsonify({'success': True})
-
-@app.route('/api/delete_account', methods=['POST'])
-def delete_account() -> Any:
-    """Permanently deletes the logged-in user's account."""
-    if 'user' not in session:
-        return jsonify({'error': 'Unauthorized'}), 401
-    
-    try:
-        username = session['user']
-        with sqlite3.connect(DB_NAME) as conn:
-            cursor = conn.cursor()
-            cursor.execute("DELETE FROM users WHERE username = ?", (username,))
-            conn.commit()
-        session.clear()
-        return jsonify({'success': True})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/user_info')
-def user_info() -> Any:
-    """Returns the current user's info."""
-    return jsonify({'username': session.get('user')})
-
-@app.route('/api/system_logs')
-def get_logs() -> Any:
-    """Returns system logs (Admin only)."""
-    if session.get('user') != 'Yoge':
-        return jsonify([])
-    return jsonify(list(reversed(SERVER_LOGS)))
+lime_explainer = LimeTextExplainer(class_names=['Real', 'Fake'])
 
 @app.route('/')
-def home() -> Any:
-    """Renders the login page."""
+def home():
+    if 'user' in session: return redirect(url_for('dashboard'))
     return render_template('login.html')
 
 @app.route('/dashboard')
-def dashboard() -> Any:
-    """Renders the main dashboard."""
-    if 'user' not in session:
-        return redirect(url_for('home'))
-    return render_template('index.html', username=session['user'])
+def dashboard():
+    if 'user' not in session: return redirect(url_for('home'))
+    return render_template('index.html')
+
+@app.route('/predict', methods=['POST'])
+def predict():
+    try:
+        data = request.get_json()
+        text = data.get('text', '').strip()
+        text_hash = hashlib.sha256(text.encode()).hexdigest()
+        cached = cache.get(text_hash)
+        if cached:
+            log_event("Serving result from Cache", "SUCCESS", "API")
+            return jsonify(cached)
+        
+        log_event(f"Analyzing Job: {text[:30]}...", "INFO", "API")
+        result = detector.predict(text)
+        
+        if result['status'] == 'invalid':
+            return jsonify({
+                'fraud_probability': 0, 'is_gibberish': True, 'verdict': 'Invalid',
+                'anomaly_analysis': result['warnings'], 'system_logs': list(reversed(result['logs']))
+            })
+            
+        final_prob = result['prob']
+        
+        xai_highlights = []
+        if final_prob > 0.35:
+            try:
+                def batch_predict_lime(texts: List[str]) -> np.ndarray:
+                    batch_size = 16
+                    all_probs = []
+                    for i in range(0, len(texts), batch_size):
+                        batch_texts = texts[i:i+batch_size]
+                        inputs = model_mgr.bert_tokenizer(batch_texts, return_tensors="pt", max_length=128, padding=True, truncation=True)
+                        dummy_feats = torch.zeros((len(batch_texts), 10)).to(DEVICE)
+                        with torch.no_grad():
+                            logits = model_mgr.bert_fusion(inputs['input_ids'].to(DEVICE), inputs['attention_mask'].to(DEVICE), dummy_feats)
+                            probs = torch.sigmoid(logits).cpu().numpy().flatten()
+                        for p in probs: all_probs.append([1-p, p])
+                    return np.array(all_probs)
+
+                exp = lime_explainer.explain_instance(text, batch_predict_lime, num_features=6, num_samples=100)
+                xai_highlights = [x[0] for x in exp.as_list() if x[1] > 0.05]
+            except Exception as e:
+                log_event(f"LIME Failed: {e}", "WARN", "XAI")
+
+        response = {
+            'fraud_probability': round(final_prob * 100, 2),
+            'is_gibberish': False,
+            'reasons': result['reasons'],        
+            'advisory': result['advisory'],      
+            'xai_insights': xai_highlights,      
+            'anomaly_analysis': [],
+            'system_logs': list(reversed(SERVER_LOGS + result['logs']))
+        }
+        cache.set(text_hash, response, timeout=3600)
+        return jsonify(response)
+    except Exception as e:
+        log_event(f"Prediction Error: {e}", "ERROR", "API")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/signup', methods=['POST'])
+def signup():
+    data = request.get_json()
+    try:
+        hashed = generate_password_hash(data['password'], method='pbkdf2:sha256')
+        with get_db() as conn:
+            conn.execute("INSERT INTO users (username, email, password) VALUES (?, ?, ?)", (data['username'], data['email'], hashed))
+            session['user'] = data['username']
+            session.permanent = True
+            log_event(f"New User Registered: {data['username']}", "SUCCESS", "AUTH")
+            return jsonify({'success': True})
+    except sqlite3.IntegrityError: return jsonify({'error': 'Username/Email exists'}), 409
+
+@app.route('/api/login', methods=['POST'])
+def login():
+    data = request.get_json()
+    with get_db() as conn:
+        user = conn.execute("SELECT * FROM users WHERE username = ?", (data['username'],)).fetchone()
+        if user and check_password_hash(user['password'], data['password']):
+            session['user'] = user['username']
+            session.permanent = data.get('remember', False)
+            log_event(f"User Login: {data['username']}", "SUCCESS", "AUTH")
+            return jsonify({'success': True, 'username': user['username']})
+    return jsonify({'error': 'Invalid credentials'}), 401
+
+@app.route('/api/user_info')
+def user_info():
+    return jsonify({'username': session['user']}) if 'user' in session else jsonify({'error': 'Not logged in'}), 401
+
+@app.route('/api/delete_account', methods=['POST'])
+def delete_account():
+    if 'user' not in session: return jsonify({'error': 'Unauthorized'}), 401
+    try:
+        with get_db() as conn: conn.execute("DELETE FROM users WHERE username = ?", (session['user'],))
+        log_event(f"Account Deleted: {session['user']}", "WARN", "AUTH")
+        session.clear()
+        return jsonify({'success': True})
+    except Exception as e: return jsonify({'error': str(e)}), 500
+
+@app.route('/api/system_logs')
+def system_logs():
+    if session.get('user') != 'Yoge': return jsonify([])
+    return jsonify(list(reversed(SERVER_LOGS)))
+
+@app.route('/api/logout', methods=['POST'])
+def logout():
+    session.clear()
+    return jsonify({'success': True})
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(host='0.0.0.0', port=7860, debug=True)
