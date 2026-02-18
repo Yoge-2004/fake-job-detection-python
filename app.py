@@ -2,7 +2,6 @@
 JobGuard: Neuro-Symbolic Fraud Detection System (Production Ready)
 ------------------------------------------------------------------
 Features: BERT + Autoencoder + Isolation Forest + LIME + S-BERT + Rule Engine.
-Fixes: Added Text Normalization/Preprocessing Pipeline.
 
 Author: Yoge-2004
 Version: 15.0.0 (Clean Input Pipeline)
@@ -419,7 +418,7 @@ class FraudDetector:
         
         ae_emb_scaled = model_mgr.scalers['ae'].transform(cls_emb)
         with tf.device('/cpu:0'): recon = model_mgr.autoencoder.predict(ae_emb_scaled, verbose=0)
-        ae_error = float(np.mean(np.power(ae_emb_scaled - recon, 2)))
+        ae_error = float(np.mean(np.power(ae_emb_scaled - recon, 2), axis=1)[0])
         iso_score = float(-model_mgr.iso_forest.decision_function(feats_scaled)[0])
         
         meta_in = np.column_stack([[bert_prob], [iso_score], [ae_error], feats_scaled])
