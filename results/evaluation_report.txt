@@ -1,0 +1,297 @@
+FAKE JOB DETECTION â€” FULL EVALUATION REPORT
+Test  Size: 6816  (Fake=3413 | Real=3403)
+Train Size: 8520  (Fake=4267 | Real=4253)
+
+=================================================================
+  [TEST]  BERT Fusion
+=================================================================
+
+[ Classification Report ]
+              precision    recall  f1-score   support
+
+    Real (0)       0.98      0.99      0.99      3403
+    Fake (1)       0.99      0.98      0.99      3413
+
+    accuracy                           0.99      6816
+   macro avg       0.99      0.99      0.99      6816
+weighted avg       0.99      0.99      0.99      6816
+
+ROC-AUC : 0.9986
+
+[ Confusion Matrix ]  TN=3385  FP=18  FN=57  TP=3356
+               Predicted Real  Predicted Fake
+  Actual Real   3385            18
+  Actual Fake   57              3356
+
+=================================================================
+  [TRAIN]  BERT Fusion
+=================================================================
+
+[ Classification Report ]
+              precision    recall  f1-score   support
+
+    Real (0)       0.99      0.99      0.99      4253
+    Fake (1)       0.99      0.99      0.99      4267
+
+    accuracy                           0.99      8520
+   macro avg       0.99      0.99      0.99      8520
+weighted avg       0.99      0.99      0.99      8520
+
+ROC-AUC : 0.9990
+
+[ Confusion Matrix ]  TN=4226  FP=27  FN=62  TP=4205
+               Predicted Real  Predicted Fake
+  Actual Real   4226            27
+  Actual Fake   62              4205
+
+=================================================================
+  [TEST]  Isolation Forest
+=================================================================
+
+[ Classification Report ]
+              precision    recall  f1-score   support
+
+    Real (0)       0.93      0.93      0.93      3403
+    Fake (1)       0.93      0.93      0.93      3413
+
+    accuracy                           0.93      6816
+   macro avg       0.93      0.93      0.93      6816
+weighted avg       0.93      0.93      0.93      6816
+
+ROC-AUC : 0.9607
+
+[ Confusion Matrix ]  TN=3178  FP=225  FN=228  TP=3185
+               Predicted Real  Predicted Fake
+  Actual Real   3178            225
+  Actual Fake   228             3185
+
+=================================================================
+  [TRAIN]  Isolation Forest
+=================================================================
+
+[ Classification Report ]
+              precision    recall  f1-score   support
+
+    Real (0)       0.94      0.94      0.94      4253
+    Fake (1)       0.94      0.94      0.94      4267
+
+    accuracy                           0.94      8520
+   macro avg       0.94      0.94      0.94      8520
+weighted avg       0.94      0.94      0.94      8520
+
+ROC-AUC : 0.9615
+
+[ Confusion Matrix ]  TN=3987  FP=266  FN=267  TP=4000
+               Predicted Real  Predicted Fake
+  Actual Real   3987            266
+  Actual Fake   267             4000
+
+=================================================================
+  [TEST]  Autoencoder
+=================================================================
+
+[ Classification Report ]
+              precision    recall  f1-score   support
+
+    Real (0)       0.98      0.99      0.98      3403
+    Fake (1)       0.99      0.98      0.98      3413
+
+    accuracy                           0.98      6816
+   macro avg       0.98      0.98      0.98      6816
+weighted avg       0.98      0.98      0.98      6816
+
+ROC-AUC : 0.9984
+
+[ Confusion Matrix ]  TN=3352  FP=51  FN=56  TP=3357
+               Predicted Real  Predicted Fake
+  Actual Real   3352            51
+  Actual Fake   56              3357
+
+=================================================================
+  [TRAIN]  Autoencoder
+=================================================================
+
+[ Classification Report ]
+              precision    recall  f1-score   support
+
+    Real (0)       0.98      0.98      0.98      4253
+    Fake (1)       0.98      0.98      0.98      4267
+
+    accuracy                           0.98      8520
+   macro avg       0.98      0.98      0.98      8520
+weighted avg       0.98      0.98      0.98      8520
+
+ROC-AUC : 0.9986
+
+[ Confusion Matrix ]  TN=4175  FP=78  FN=85  TP=4182
+               Predicted Real  Predicted Fake
+  Actual Real   4175            78
+  Actual Fake   85              4182
+
+=================================================================
+  [TEST]  Logistic Regression
+=================================================================
+
+[ Classification Report ]
+              precision    recall  f1-score   support
+
+    Real (0)       0.98      0.99      0.99      3403
+    Fake (1)       0.99      0.98      0.99      3413
+
+    accuracy                           0.99      6816
+   macro avg       0.99      0.99      0.99      6816
+weighted avg       0.99      0.99      0.99      6816
+
+ROC-AUC : 0.9990
+
+[ Confusion Matrix ]  TN=3382  FP=21  FN=57  TP=3356
+               Predicted Real  Predicted Fake
+  Actual Real   3382            21
+  Actual Fake   57              3356
+
+=================================================================
+  [TRAIN]  Logistic Regression
+=================================================================
+
+[ Classification Report ]
+              precision    recall  f1-score   support
+
+    Real (0)       0.99      0.99      0.99      4253
+    Fake (1)       0.99      0.99      0.99      4267
+
+    accuracy                           0.99      8520
+   macro avg       0.99      0.99      0.99      8520
+weighted avg       0.99      0.99      0.99      8520
+
+ROC-AUC : 0.9991
+
+[ Confusion Matrix ]  TN=4227  FP=26  FN=62  TP=4205
+               Predicted Real  Predicted Fake
+  Actual Real   4227            26
+  Actual Fake   62              4205
+
+=================================================================
+  [TEST]  Gradient Boosting
+=================================================================
+
+[ Classification Report ]
+              precision    recall  f1-score   support
+
+    Real (0)       0.98      0.99      0.99      3403
+    Fake (1)       0.99      0.98      0.99      3413
+
+    accuracy                           0.99      6816
+   macro avg       0.99      0.99      0.99      6816
+weighted avg       0.99      0.99      0.99      6816
+
+ROC-AUC : 0.9988
+
+[ Confusion Matrix ]  TN=3380  FP=23  FN=55  TP=3358
+               Predicted Real  Predicted Fake
+  Actual Real   3380            23
+  Actual Fake   55              3358
+
+=================================================================
+  [TRAIN]  Gradient Boosting
+=================================================================
+
+[ Classification Report ]
+              precision    recall  f1-score   support
+
+    Real (0)       1.00      1.00      1.00      4253
+    Fake (1)       1.00      1.00      1.00      4267
+
+    accuracy                           1.00      8520
+   macro avg       1.00      1.00      1.00      8520
+weighted avg       1.00      1.00      1.00      8520
+
+ROC-AUC : 1.0000
+
+[ Confusion Matrix ]  TN=4250  FP=3  FN=19  TP=4248
+               Predicted Real  Predicted Fake
+  Actual Real   4250            3
+  Actual Fake   19              4248
+
+=================================================================
+  [TEST]  MLP Classifier
+=================================================================
+
+[ Classification Report ]
+              precision    recall  f1-score   support
+
+    Real (0)       0.98      0.99      0.99      3403
+    Fake (1)       0.99      0.98      0.99      3413
+
+    accuracy                           0.99      6816
+   macro avg       0.99      0.99      0.99      6816
+weighted avg       0.99      0.99      0.99      6816
+
+ROC-AUC : 0.9985
+
+[ Confusion Matrix ]  TN=3383  FP=20  FN=54  TP=3359
+               Predicted Real  Predicted Fake
+  Actual Real   3383            20
+  Actual Fake   54              3359
+
+=================================================================
+  [TRAIN]  MLP Classifier
+=================================================================
+
+[ Classification Report ]
+              precision    recall  f1-score   support
+
+    Real (0)       0.99      1.00      0.99      4253
+    Fake (1)       1.00      0.99      0.99      4267
+
+    accuracy                           0.99      8520
+   macro avg       0.99      0.99      0.99      8520
+weighted avg       0.99      0.99      0.99      8520
+
+ROC-AUC : 0.9997
+
+[ Confusion Matrix ]  TN=4246  FP=7  FN=44  TP=4223
+               Predicted Real  Predicted Fake
+  Actual Real   4246            7
+  Actual Fake   44              4223
+
+=================================================================
+  [TEST]  â˜… Full Ensemble
+=================================================================
+
+[ Classification Report ]
+              precision    recall  f1-score   support
+
+    Real (0)       0.98      0.99      0.99      3403
+    Fake (1)       0.99      0.98      0.99      3413
+
+    accuracy                           0.99      6816
+   macro avg       0.99      0.99      0.99      6816
+weighted avg       0.99      0.99      0.99      6816
+
+ROC-AUC : 0.9991
+
+[ Confusion Matrix ]  TN=3384  FP=19  FN=56  TP=3357
+               Predicted Real  Predicted Fake
+  Actual Real   3384            19
+  Actual Fake   56              3357
+
+=================================================================
+  [TRAIN]  â˜… Full Ensemble
+=================================================================
+
+[ Classification Report ]
+              precision    recall  f1-score   support
+
+    Real (0)       0.99      1.00      0.99      4253
+    Fake (1)       1.00      0.99      0.99      4267
+
+    accuracy                           0.99      8520
+   macro avg       0.99      0.99      0.99      8520
+weighted avg       0.99      0.99      0.99      8520
+
+ROC-AUC : 0.9999
+
+[ Confusion Matrix ]  TN=4242  FP=11  FN=47  TP=4220
+               Predicted Real  Predicted Fake
+  Actual Real   4242            11
+  Actual Fake   47              4220
