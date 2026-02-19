@@ -1,6 +1,6 @@
 # JobGuard: Neuro-Symbolic Fraud Detection System
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) [![Python](https://img.shields.io/badge/Python-3.10%2B-blue)](https://www.python.org/) [![Framework](https://img.shields.io/badge/Backend-Flask-red)](https://flask.palletsprojects.com/) [![AI Engine](https://img.shields.io/badge/Model-Voting%20Ensemble-green)]() [![State](https://img.shields.io/badge/System-Production%20Ready-brightgreen)]()
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) [![Python](https://img.shields.io/badge/Python-3.12%2B-blue)](https://www.python.org/) [![Framework](https://img.shields.io/badge/Backend-Flask-red)](https://flask.palletsprojects.com/) [![AI Engine](https://img.shields.io/badge/Model-Voting%20Ensemble-green)]() [![State](https://img.shields.io/badge/System-Production%20Ready-brightgreen)]()
 
 ## 📋 Table of Contents
 1. [📌 Executive Overview](#overview)
@@ -69,7 +69,10 @@ The extracted features are fed into `meta_ensemble.pkl`, a **Soft Voting Classif
    - **Role:** The Calibrator.
    - **Logic:** A linear probabilistic model that provides a stable baseline. It ensures the final probability score (0-100%) is mathematically well-calibrated.
 
-**Ensemble Logic:** $$ P_{ensemble} = \frac{1}{3} (P_{MLP} + P_{GBM} + P_{LogReg}) $$
+**Ensemble Logic:** 
+$$ 
+P_{ensemble} = \frac{1}{3} (P_{MLP} + P_{GBM} + P_{LogReg}) 
+$$
 
 ### Phase 4: The Parallel Inference Expert (S-BERT)
 Running alongside the ensemble is the **Semantic Knowledge Base**.
