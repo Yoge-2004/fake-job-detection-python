@@ -70,6 +70,7 @@ The extracted features are fed into `meta_ensemble.pkl`, a **Soft Voting Classif
    - **Logic:** A linear probabilistic model that provides a stable baseline. It ensures the final probability score (0-100%) is mathematically well-calibrated.
 
 **Ensemble Logic:** 
+
 $$ 
 P_{ensemble} = \frac{1}{3} (P_{MLP} + P_{GBM} + P_{LogReg}) 
 $$
