@@ -102,6 +102,7 @@ Running alongside the ensemble is the **Semantic Knowledge Base**.
 ### ⚡ Production Engineering
 - **Real-Time Inference:** The entire pipeline (cleaning -> BERT -> Ensemble -> S-BERT) executes in **< 200ms** on a standard CPU.
 - **Dockerized:** Fully containerized environment ensuring reproducibility. System-level dependencies (`libenchant`) are handled automatically.
+- **Faster Cold Starts:** The Docker image preloads Hugging Face model assets during build to reduce startup-time network fetches.
 - **Smart Caching:** SHA-256 hashing of inputs ensures instant results for repeated queries.
 - **Live Telemetry:** Color-coded, real-time system logs visible only to administrators for debugging and monitoring.
 
@@ -135,7 +136,8 @@ JobGuard_Root/
 │
 ├── app.py                            # Main Application (Neuro-Symbolic Engine)
 ├── Dockerfile                        # Container Configuration
-├── requirements.txt                  # Python Dependencies
+├── pyproject.toml                    # Python Dependencies
+├── uv.lock                           # Locked Dependency Graph
 ├── packages.txt                      # System Dependencies (libenchant)
 │
 ├── models/                           # Serialized AI Models
@@ -169,6 +171,8 @@ docker build -t jobguard .
 docker run -p 7860:7860 jobguard
 ```
 
+The first image build is heavier because it warms the Hugging Face model cache into the image. Subsequent container starts are faster and less network-dependent.
+
 ### Option B: Manual Setup
 **Prerequisites:** You must install `libenchant-2-dev` on your system.
 
@@ -176,11 +180,11 @@ docker run -p 7860:7860 jobguard
 # Ubuntu/Debian
 sudo apt-get install libenchant-2-dev
 
-# Install Python Libs
-pip install -r requirements.txt
+# Install Python dependencies
+uv sync
 
 # Run
-python app.py
+uv run python app.py
 ```
 
 ---

@@ -38,7 +38,7 @@ try:
     HAS_WORDFREQ = True
 except ImportError:
     HAS_WORDFREQ = False
-    print("⚠️ 'wordfreq' library not found. Install via: pip install wordfreq")
+    print("⚠️ 'wordfreq' library not found. Install via: uv add wordfreq")
 
 # 2. Try importing pyenchant
 try:
@@ -47,7 +47,7 @@ try:
     HAS_ENCHANT = True
 except ImportError:
     HAS_ENCHANT = False
-    print("⚠️ 'pyenchant' library not found. Using internal fallback.")
+    print("⚠️ 'pyenchant' library not found. Install via: uv add pyenchant")
 
 # ==========================================
 # 0. SYSTEM CONFIGURATION & LOGGING
@@ -146,29 +146,37 @@ class TextProcessor:
         lower_text = text_str.lower()
         length = len(text_str) if len(text_str) > 0 else 1
         
-        has_logo = 0
+        has_company_logo = 0
         has_questions = 1 if "?" in text_str else 0
         caps_ratio = sum(1 for c in text_str if c.isupper()) / length
-        has_email = 1 if re.search(r'[\w\.-]+@[\w\.-]+\.\w+', text_str) else 0
-        has_phone = 1 if re.search(r'\+?\d[\d -]{8,12}\d', text_str) else 0
+        has_email_in_desc = 1 if re.search(r'[\w\.-]+@[\w\.-]+\.\w+', text_str) else 0
+        has_phone_in_desc = 1 if re.search(r'\+?\d[\d -]{8,12}\d', text_str) else 0
         
         admin_keywords = ['admin', 'assistant', 'clerk', 'data entry', 'secretary']
-        is_admin = 1 if any(k in lower_text for k in admin_keywords) else 0
+        is_admin_role = 1 if any(k in lower_text for k in admin_keywords) else 0
         
         socials = ['instagram', 'facebook', 'linkedin', 'twitter', 'telegram', 'whatsapp']
-        has_social = 1 if any(s in lower_text for s in socials) else 0
+        has_social_mention = 1 if any(s in lower_text for s in socials) else 0
         
         exclamation_ratio = text_str.count("!") / length
         money_count = len(re.findall(r'(\$|rs\.?|usd|inr)\s?\d+', lower_text)) + lower_text.count('salary')
-        money_ratio = money_count / length
+        money_mention_ratio = money_count / length
         
         urgency_words = ['urgent', 'immediate', 'now', 'deadline', 'hurry', 'asap']
         urgency_ratio = sum(1 for w in urgency_words if w in lower_text) / length
-        
+
         return np.array([
-            has_logo, has_questions, caps_ratio, has_email, has_phone,
-            is_admin, has_social, exclamation_ratio, money_ratio, urgency_ratio
-        ])
+        has_company_logo,      # 1
+        has_questions,         # 2  
+        caps_ratio,            # 3
+        exclamation_ratio,     # 4
+        money_mention_ratio,   # 5
+        urgency_ratio,         # 6
+        has_email_in_desc,     # 7
+        has_phone_in_desc,     # 8
+        is_admin_role,         # 9
+        has_social_mention     # 10
+    ])
 
     @staticmethod
     def extract_entities_robust(text: str) -> Dict[str, List[str]]:

@@ -1,0 +1,9 @@
+services:
+  jobguard:
+    image: jobguard:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "7860:7860"
+    restart: unless-stopped
