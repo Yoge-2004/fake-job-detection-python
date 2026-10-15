@@ -1,3 +1,13 @@
+---
+title: Fake Job Detector
+emoji: 🕵️
+colorFrom: blue
+colorTo: green
+sdk: docker
+app_port: 7860
+license: mit
+---
+
 # JobGuard: Neuro-Symbolic Fraud Detection System
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
