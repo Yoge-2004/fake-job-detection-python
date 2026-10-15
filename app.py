@@ -26,6 +26,7 @@ from flask import Flask, request, jsonify, session, render_template, redirect, u
 from flask_caching import Cache
 from lime.lime_text import LimeTextExplainer
 from werkzeug.security import generate_password_hash, check_password_hash
+from werkzeug.middleware.proxy_fix import ProxyFix
 from authlib.integrations.flask_client import OAuth
 
 # --- NLP & Deep Learning ---
@@ -591,6 +592,7 @@ detector = FraudDetector()
 # 5. FLASK APP, SWAGGER & ASYNC TASK POOL
 # ==========================================
 app = Flask(__name__)
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 app.secret_key = os.getenv("SECRET_KEY", "SuperSecretJobGuardKey2026")
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=7)
 app.config['CACHE_TYPE'] = 'SimpleCache'
@@ -1106,7 +1108,8 @@ def google_login():
             }), 503
         return redirect('/?error=oauth_not_configured')
 
-    redirect_uri = url_for('google_callback', _external=True)
+    scheme = "https" if request.headers.get("X-Forwarded-Proto") == "https" or request.is_secure or "hf.space" in request.host else None
+    redirect_uri = url_for('google_callback', _external=True, _scheme=scheme) if scheme else url_for('google_callback', _external=True)
     return oauth.google.authorize_redirect(redirect_uri)
 
 
