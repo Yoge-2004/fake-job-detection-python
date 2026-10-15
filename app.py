@@ -7,6 +7,9 @@ Author: Yoge-2004
 Version: 16.0.0 (SOTA 98.45% Acc / 0.9942 ROC-AUC / 96.0% Trojan-Horse Nuance Recall)
 """
 
+import gc
+from concurrent.futures import ThreadPoolExecutor
+from flasgger import Swagger
 import hashlib
 import joblib
 import os
@@ -23,6 +26,7 @@ from flask import Flask, request, jsonify, session, render_template, redirect, u
 from flask_caching import Cache
 from lime.lime_text import LimeTextExplainer
 from werkzeug.security import generate_password_hash, check_password_hash
+from authlib.integrations.flask_client import OAuth
 
 # --- NLP & Deep Learning ---
 from sentence_transformers import SentenceTransformer, util
@@ -30,6 +34,7 @@ import torch
 import torch.nn as nn
 from transformers import DistilBertTokenizer, DistilBertModel
 import tensorflow as tf
+import keras
 from tensorflow.keras.models import load_model
 
 # 1. Try importing wordfreq
@@ -45,15 +50,17 @@ try:
     import enchant
     SPELL_CHECKER = enchant.Dict("en_US")
     HAS_ENCHANT = True
-except ImportError:
+except Exception as e:
     HAS_ENCHANT = False
-    print("⚠️ 'pyenchant' library not found. Install via: uv add pyenchant")
+    SPELL_CHECKER = None
+    print(f"⚠️ 'pyenchant' not available ({e}).")
 
 # ==========================================
 # 0. SYSTEM CONFIGURATION & LOGGING
 # ==========================================
 SERVER_LOGS: List[str] = []
-MODEL_DIR = "models"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+MODEL_DIR = os.path.join(BASE_DIR, "models")
 DEVICE = torch.device('cpu')
 os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 MAX_LEN = 256  # Synchronized 1-to-1 with SOTA Kaggle training pipeline
@@ -370,7 +377,10 @@ class ModelManager:
             self.scalers['ae'] = joblib.load(os.path.join(MODEL_DIR, 'ae_scaler.pkl'))
             self.iso_forest = joblib.load(os.path.join(MODEL_DIR, 'iso_forest.pkl'))
             self.meta_ensemble = joblib.load(os.path.join(MODEL_DIR, 'meta_ensemble.pkl'))
-            self.autoencoder = load_model(os.path.join(MODEL_DIR, 'autoencoder.keras'), compile=False)
+            try:
+                self.autoencoder = keras.models.load_model(os.path.join(MODEL_DIR, 'autoencoder.keras'), compile=False)
+            except Exception:
+                self.autoencoder = load_model(os.path.join(MODEL_DIR, 'autoencoder.keras'), compile=False)
             self.bert_tokenizer = DistilBertTokenizer.from_pretrained('distilbert-base-uncased')
 
             base_bert = BERTFusion(num_features=10)
@@ -578,25 +588,86 @@ class FraudDetector:
 detector = FraudDetector()
 
 # ==========================================
-# 5. FLASK APP & ROUTES
+# 5. FLASK APP, SWAGGER & ASYNC TASK POOL
 # ==========================================
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", "SuperSecretJobGuardKey2026")
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=7)
-cache = Cache(app, config={'CACHE_TYPE': 'SimpleCache'})
+app.config['CACHE_TYPE'] = 'SimpleCache'
+app.config['CACHE_THRESHOLD'] = 2000
+app.config['CACHE_DEFAULT_TIMEOUT'] = 86400
+app.config['SWAGGER'] = {
+    'title': 'JobGuard AI API',
+    'uiversion': 3,
+    'description': 'Production Neuro-Symbolic Recruitment Fraud Detection API',
+    'version': '16.0.0'
+}
 
-DB_NAME = "users.db"
+cache = Cache(app)
+scan_executor = ThreadPoolExecutor(max_workers=2)
+ACTIVE_SCANS: Dict[str, Dict[str, Any]] = {}
+APP_START_TIME = datetime.now()
+
+# Swagger UI Configuration
+swagger_config = {
+    "headers": [],
+    "specs": [
+        {
+            "endpoint": "apispec_1",
+            "route": "/apispec_1.json",
+            "rule_filter": lambda rule: True,
+            "model_filter": lambda tag: True,
+        }
+    ],
+    "static_url_path": "/flasgger_static",
+    "swagger_ui": True,
+    "specs_route": "/docs"
+}
+
+swagger_template = {
+    "swagger": "2.0",
+    "info": {
+        "title": "JobGuard AI API",
+        "description": "Production SOTA Neuro-Symbolic Recruitment Fraud Detection System API",
+        "version": "16.0.0",
+        "contact": {
+            "name": "JobGuard AI Engineering",
+            "url": "https://yoge-2004-fake-job-detector.hf.space"
+        }
+    },
+    "basePath": "/",
+    "schemes": ["http", "https"],
+}
+
+swagger = Swagger(app, template=swagger_template, config=swagger_config)
+
+# ==========================================
+# Google OAuth 2.0 Integration
+# ==========================================
+oauth = OAuth(app)
+oauth.register(
+    name="google",
+    client_id=os.getenv("GOOGLE_CLIENT_ID", ""),
+    client_secret=os.getenv("GOOGLE_CLIENT_SECRET", ""),
+    server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
+    client_kwargs={"scope": "openid email profile"}
+)
+
+
+DB_NAME = os.path.join(BASE_DIR, "users.db")
 
 
 def get_db():
-    conn = sqlite3.connect(DB_NAME)
+    conn = sqlite3.connect(DB_NAME, timeout=10.0)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
     return conn
 
 
 def init_db():
     with get_db() as conn:
-        conn.execute('''CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, username TEXT UNIQUE, email TEXT UNIQUE, password TEXT)''')
+        conn.execute("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, username TEXT UNIQUE, email TEXT UNIQUE, password TEXT)")
 
 
 init_db()
@@ -604,8 +675,82 @@ init_db()
 lime_explainer = LimeTextExplainer(class_names=['Real', 'Fake'])
 
 
+def run_inference_task(text_hash: str, text: str) -> Dict[str, Any]:
+    """Thread-safe, memory-managed inference worker for long-term server stability."""
+    try:
+        log_event(f"Analyzing Job [Hash: {text_hash[:8]}]: {text[:35]}...", "INFO", "WORKER")
+        result = detector.predict(text)
+
+        if result['status'] == 'invalid':
+            response = {
+                'fraud_probability': 0, 'is_gibberish': True, 'verdict': 'Invalid',
+                'anomaly_analysis': result['warnings'], 'system_logs': list(reversed(result['logs']))
+            }
+        else:
+            final_prob = result['prob']
+            xai_highlights = []
+
+            if final_prob > 0.35:
+                try:
+                    real_feats = result['feats_scaled']
+                    explain_target_text = result.get('most_suspicious_chunk', text)
+
+                    def batch_predict_lime(texts: List[str]) -> np.ndarray:
+                        inputs = model_mgr.bert_tokenizer(
+                            texts, return_tensors="pt", max_length=MAX_LEN, padding='max_length', truncation=True
+                        )
+                        actual_feats_batch = torch.tensor(
+                            np.repeat(real_feats, len(texts), axis=0), dtype=torch.float32, device=DEVICE
+                        )
+                        with torch.inference_mode():
+                            logits = model_mgr.bert_fusion(
+                                inputs['input_ids'].to(DEVICE), inputs['attention_mask'].to(DEVICE), actual_feats_batch
+                            )
+                            probs = torch.sigmoid(logits).cpu().numpy().flatten()
+                        return np.column_stack([1.0 - probs, probs])
+
+                    exp = lime_explainer.explain_instance(explain_target_text, batch_predict_lime, num_features=6, num_samples=16)
+                    xai_highlights = [x[0] for x in exp.as_list() if x[1] > 0.04]
+                except Exception as e:
+                    log_event(f"LIME Failed: {e}", "WARN", "XAI")
+
+            response = {
+                'fraud_probability': round(final_prob * 100, 2),
+                'is_gibberish': False,
+                'reasons': result['reasons'],
+                'advisory': result['advisory'],
+                'xai_insights': xai_highlights,
+                'anomaly_analysis': [],
+                'system_logs': list(reversed(SERVER_LOGS + result['logs']))
+            }
+
+        cache.set(text_hash, response, timeout=86400)
+        ACTIVE_SCANS[text_hash] = {
+            'status': 'completed',
+            'result': response,
+            'completed_at': datetime.now().isoformat()
+        }
+
+        # Memory cleanup for long-running stability
+        if len(ACTIVE_SCANS) > 600:
+            for k in list(ACTIVE_SCANS.keys())[:150]:
+                ACTIVE_SCANS.pop(k, None)
+        gc.collect()
+
+        return response
+    except Exception as e:
+        log_event(f"Inference Task Failed: {e}", "ERROR", "API")
+        ACTIVE_SCANS[text_hash] = {
+            'status': 'error',
+            'error': str(e),
+            'completed_at': datetime.now().isoformat()
+        }
+        raise e
+
+
 @app.route('/')
 def home():
+    """Access Control Terminal / Landing View"""
     if 'user' in session:
         return redirect(url_for('dashboard'))
     return render_template('login.html')
@@ -613,74 +758,217 @@ def home():
 
 @app.route('/dashboard')
 def dashboard():
+    """Main Operator Defense Grid Dashboard"""
     if 'user' not in session:
         return redirect(url_for('home'))
     return render_template('index.html')
 
 
+@app.route('/api/health', methods=['GET'])
+def health():
+    """System Health and Readiness Probe
+    ---
+    tags:
+      - System Monitoring
+    responses:
+      200:
+        description: System status and uptime metrics
+        schema:
+          type: object
+          properties:
+            status:
+              type: string
+              example: "healthy"
+            uptime_seconds:
+              type: number
+            active_scans:
+              type: integer
+            models_loaded:
+              type: boolean
+    """
+    uptime = (datetime.now() - APP_START_TIME).total_seconds()
+    active_count = len([s for s in ACTIVE_SCANS.values() if s.get('status') == 'processing'])
+    return jsonify({
+        'status': 'healthy',
+        'uptime_seconds': round(uptime, 1),
+        'active_scans': active_count,
+        'models_loaded': model_mgr.bert_fusion is not None and model_mgr.autoencoder is not None
+    })
+
+
+@app.route('/api/scan', methods=['POST'])
+def submit_scan():
+    """Submit a job posting for asynchronous background analysis
+    ---
+    tags:
+      - Fraud Detection
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - text
+          properties:
+            text:
+              type: string
+              example: "Urgent hiring: Remote Data Entry Operator. Salary $45/hr. Contact via Telegram."
+    responses:
+      200:
+        description: Scan initialized or result returned from cache
+        schema:
+          type: object
+          properties:
+            job_id:
+              type: string
+            status:
+              type: string
+              enum: [processing, completed]
+            result:
+              type: object
+      400:
+        description: Missing or insufficient text (minimum 5 characters)
+    """
+    data = request.get_json(silent=True) or {}
+    text = str(data.get('text', '')).strip()
+    if len(text) < 5:
+        return jsonify({'error': 'Job description text must be at least 5 characters'}), 400
+
+    text_hash = hashlib.sha256(text.encode()).hexdigest()
+
+    cached = cache.get(text_hash)
+    if cached:
+        return jsonify({'job_id': text_hash, 'status': 'completed', 'result': cached})
+
+    if text_hash in ACTIVE_SCANS and ACTIVE_SCANS[text_hash].get('status') == 'processing':
+        return jsonify({'job_id': text_hash, 'status': 'processing'})
+
+    ACTIVE_SCANS[text_hash] = {
+        'status': 'processing',
+        'started_at': datetime.now().isoformat(),
+        'result': None,
+        'error': None
+    }
+    scan_executor.submit(run_inference_task, text_hash, text)
+    return jsonify({'job_id': text_hash, 'status': 'processing'})
+
+
+@app.route('/api/scan_status/<job_id>', methods=['GET'])
+def get_scan_status(job_id: str):
+    """Check processing status of a submitted job scan
+    ---
+    tags:
+      - Fraud Detection
+    parameters:
+      - in: path
+        name: job_id
+        type: string
+        required: true
+        description: SHA-256 hash returned by /api/scan or /predict
+    responses:
+      200:
+        description: Current processing status and result when complete
+        schema:
+          type: object
+          properties:
+            job_id:
+              type: string
+            status:
+              type: string
+              enum: [processing, completed, error]
+            result:
+              type: object
+            error:
+              type: string
+      404:
+        description: Job ID not found
+    """
+    cached = cache.get(job_id)
+    if cached:
+        return jsonify({'job_id': job_id, 'status': 'completed', 'result': cached})
+
+    scan_info = ACTIVE_SCANS.get(job_id)
+    if not scan_info:
+        return jsonify({'job_id': job_id, 'status': 'not_found', 'error': 'Scan job not found'}), 404
+
+    return jsonify({
+        'job_id': job_id,
+        'status': scan_info.get('status'),
+        'result': scan_info.get('result'),
+        'error': scan_info.get('error')
+    })
+
+
 @app.route('/predict', methods=['POST'])
 def predict():
+    """Synchronous fraud detection inference endpoint (backwards compatible)
+    ---
+    tags:
+      - Fraud Detection
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - text
+          properties:
+            text:
+              type: string
+              example: "Senior Software Engineer - Full-time, onsite at NYC headquarters."
+    responses:
+      200:
+        description: Inference completed successfully
+        schema:
+          type: object
+          properties:
+            job_id:
+              type: string
+            fraud_probability:
+              type: number
+            is_gibberish:
+              type: boolean
+            reasons:
+              type: array
+              items:
+                type: string
+            advisory:
+              type: array
+              items:
+                type: string
+            xai_insights:
+              type: array
+              items:
+                type: string
+            system_logs:
+              type: array
+              items:
+                type: string
+      400:
+        description: Invalid request payload
+      500:
+        description: Server processing error
+    """
     try:
-        data = request.get_json()
-        text = data.get('text', '').strip()
-        text_hash = hashlib.sha256(text.encode()).hexdigest()
+        data = request.get_json(silent=True) or {}
+        text = str(data.get('text', '')).strip()
+        if len(text) < 5:
+            return jsonify({'error': 'Job description text must be at least 5 characters'}), 400
 
+        text_hash = hashlib.sha256(text.encode()).hexdigest()
         cached = cache.get(text_hash)
         if cached:
             log_event("Serving result from Cache", "SUCCESS", "API")
-            return jsonify(cached)
+            res = dict(cached)
+            res['job_id'] = text_hash
+            return jsonify(res)
 
-        log_event(f"Analyzing Job: {text[:30]}...", "INFO", "API")
-        result = detector.predict(text)
-
-        if result['status'] == 'invalid':
-            return jsonify({
-                'fraud_probability': 0, 'is_gibberish': True, 'verdict': 'Invalid',
-                'anomaly_analysis': result['warnings'], 'system_logs': list(reversed(result['logs']))
-            })
-
-        final_prob = result['prob']
-        xai_highlights = []
-
-        if final_prob > 0.35:
-            try:
-                real_feats = result['feats_scaled']
-                # Run LIME on the highest-risk window so long 3,000-word postings explain the exact scam trigger fast!
-                explain_target_text = result.get('most_suspicious_chunk', text)
-
-                def batch_predict_lime(texts: List[str]) -> np.ndarray:
-                    inputs = model_mgr.bert_tokenizer(
-                        texts, return_tensors="pt", max_length=MAX_LEN, padding='max_length', truncation=True
-                    )
-                    actual_feats_batch = torch.tensor(
-                        np.repeat(real_feats, len(texts), axis=0), dtype=torch.float32, device=DEVICE
-                    )
-                    with torch.no_grad():
-                        logits = model_mgr.bert_fusion(
-                            inputs['input_ids'].to(DEVICE), inputs['attention_mask'].to(DEVICE), actual_feats_batch
-                        )
-                        probs = torch.sigmoid(logits).cpu().numpy().flatten()
-                    return np.column_stack([1.0 - probs, probs])
-
-                exp = lime_explainer.explain_instance(explain_target_text, batch_predict_lime, num_features=6, num_samples=24)
-                xai_highlights = [x[0] for x in exp.as_list() if x[1] > 0.04]
-
-            except Exception as e:
-                log_event(f"LIME Failed: {e}", "WARN", "XAI")
-
-        response = {
-            'fraud_probability': round(final_prob * 100, 2),
-            'is_gibberish': False,
-            'reasons': result['reasons'],
-            'advisory': result['advisory'],
-            'xai_insights': xai_highlights,
-            'anomaly_analysis': [],
-            'system_logs': list(reversed(SERVER_LOGS + result['logs']))
-        }
-
-        cache.set(text_hash, response, timeout=3600)
-        return jsonify(response)
-
+        response = run_inference_task(text_hash, text)
+        res = dict(response)
+        res['job_id'] = text_hash
+        return jsonify(res)
     except Exception as e:
         log_event(f"Prediction Error: {e}", "ERROR", "API")
         return jsonify({'error': str(e)}), 500
@@ -688,34 +976,210 @@ def predict():
 
 @app.route('/api/signup', methods=['POST'])
 def signup():
-    data = request.get_json()
+    """Register a new operator unit
+    ---
+    tags:
+      - Authentication
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - username
+            - email
+            - password
+          properties:
+            username:
+              type: string
+              example: "Operator_01"
+            email:
+              type: string
+              example: "operator01@defense.net"
+            password:
+              type: string
+              example: "CyberSecure#2026!"
+    responses:
+      200:
+        description: Operator successfully integrated
+      400:
+        description: Constraint validation failed
+      409:
+        description: Username or email already registered
+    """
+    data = request.get_json(silent=True) or {}
+    username = str(data.get('username', '')).strip()
+    email = str(data.get('email', '')).strip().lower()
+    password = str(data.get('password', ''))
+
+    if not username or not re.match(r'^[a-zA-Z0-9_]{3,15}$', username):
+        return jsonify({'error': 'Username must be 3-15 alphanumeric characters'}), 400
+
+    if not email or not re.match(r'^[\w\.\+-]+@[\w\.-]+\.[a-zA-Z]{2,8}$', email):
+        return jsonify({'error': 'Invalid email address format'}), 400
+
+    if (len(password) < 8 or 
+        not re.search(r'[A-Z]', password) or 
+        not re.search(r'[a-z]', password) or 
+        not re.search(r'[0-9]', password) or 
+        not re.search(r'[^a-zA-Z0-9]', password)):
+        return jsonify({'error': 'Password does not meet security criteria (8+ chars, upper, lower, number, symbol)'}), 400
+
     try:
-        hashed = generate_password_hash(data['password'], method='pbkdf2:sha256')
+        hashed = generate_password_hash(password, method='pbkdf2:sha256')
         with get_db() as conn:
-            conn.execute("INSERT INTO users (username, email, password) VALUES (?, ?, ?)", (data['username'], data['email'], hashed))
-            session['user'] = data['username']
+            conn.execute("INSERT INTO users (username, email, password) VALUES (?, ?, ?)", (username, email, hashed))
+            session['user'] = username
             session.permanent = True
-            log_event(f"New User Registered: {data['username']}", "SUCCESS", "AUTH")
+            log_event(f"New User Registered: {username}", "SUCCESS", "AUTH")
             return jsonify({'success': True})
     except sqlite3.IntegrityError:
-        return jsonify({'error': 'Username/Email exists'}), 409
+        return jsonify({'error': 'Username or Email already registered'}), 409
 
 
 @app.route('/api/login', methods=['POST'])
 def login():
-    data = request.get_json()
+    """Authenticate operator credentials
+    ---
+    tags:
+      - Authentication
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - username
+            - password
+          properties:
+            username:
+              type: string
+              example: "Operator_01"
+            password:
+              type: string
+              example: "CyberSecure#2026!"
+            remember:
+              type: boolean
+              example: true
+    responses:
+      200:
+        description: Access granted
+      401:
+        description: Access denied (invalid credentials)
+    """
+    data = request.get_json(silent=True) or {}
+    username = str(data.get('username', '')).strip()
+    password = str(data.get('password', ''))
+
     with get_db() as conn:
-        user = conn.execute("SELECT * FROM users WHERE username = ?", (data['username'],)).fetchone()
-        if user and check_password_hash(user['password'], data['password']):
+        user = conn.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
+        if user and check_password_hash(user['password'], password):
             session['user'] = user['username']
             session.permanent = data.get('remember', False)
-            log_event(f"User Login: {data['username']}", "SUCCESS", "AUTH")
+            log_event(f"User Login: {username}", "SUCCESS", "AUTH")
             return jsonify({'success': True, 'username': user['username']})
     return jsonify({'error': 'Invalid credentials'}), 401
 
 
-@app.route('/api/user_info')
+
+@app.route('/api/auth/google/login', methods=['GET'])
+def google_login():
+    """Initiate Google OAuth 2.0 / OpenID Connect authorization
+    ---
+    tags:
+      - Authentication
+    responses:
+      302:
+        description: Redirect to Google Accounts authorization endpoint
+      503:
+        description: Google OAuth credentials not configured on server
+    """
+    client_id = os.getenv("GOOGLE_CLIENT_ID", "").strip()
+    client_secret = os.getenv("GOOGLE_CLIENT_SECRET", "").strip()
+    if not client_id or not client_secret:
+        log_event("Google OAuth login attempted but GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET is missing", "WARN", "AUTH")
+        if request.accept_mimetypes.accept_json and not request.accept_mimetypes.accept_html:
+            return jsonify({
+                'error': 'Google OAuth credentials not configured. Please set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET.'
+            }), 503
+        return redirect('/?error=oauth_not_configured')
+
+    redirect_uri = url_for('google_callback', _external=True)
+    return oauth.google.authorize_redirect(redirect_uri)
+
+
+@app.route('/api/auth/google/callback', methods=['GET'])
+def google_callback():
+    """Handle Google OAuth 2.0 callback and establish authenticated session
+    ---
+    tags:
+      - Authentication
+    responses:
+      302:
+        description: Redirect to /dashboard upon successful authentication, or /?error=... upon failure
+    """
+    try:
+        token = oauth.google.authorize_access_token()
+        user_info = token.get('userinfo')
+        if not user_info:
+            user_info = oauth.google.userinfo()
+
+        email = str(user_info.get('email', '')).strip().lower()
+        if not email:
+            log_event("Google OAuth callback missing email address", "WARN", "AUTH")
+            return redirect('/?error=google_missing_email')
+
+        # Clean/derive an alphanumeric username
+        raw_name = str(user_info.get('name', '')).strip()
+        base_username = re.sub(r'[^a-zA-Z0-9_]', '', raw_name.replace(' ', '_'))
+        if not base_username or len(base_username) < 3:
+            base_username = re.sub(r'[^a-zA-Z0-9_]', '', email.split('@')[0])
+        if len(base_username) < 3:
+            base_username = f"user_{base_username}"
+        base_username = base_username[:12]
+
+        with get_db() as conn:
+            existing = conn.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
+            if existing:
+                session['user'] = existing['username']
+                session.permanent = True
+                log_event(f"Google OAuth Login Success: {existing['username']} ({email})", "SUCCESS", "AUTH")
+            else:
+                candidate = base_username
+                suffix = 1
+                while conn.execute("SELECT 1 FROM users WHERE username = ?", (candidate,)).fetchone():
+                    candidate = f"{base_username}_{suffix}"[:15]
+                    suffix += 1
+
+                oauth_hash = generate_password_hash(f"oauth_google_{os.urandom(16).hex()}", method='pbkdf2:sha256')
+                conn.execute(
+                    "INSERT INTO users (username, email, password) VALUES (?, ?, ?)",
+                    (candidate, email, oauth_hash)
+                )
+                session['user'] = candidate
+                session.permanent = True
+                log_event(f"New Google OAuth User Registered: {candidate} ({email})", "SUCCESS", "AUTH")
+
+        return redirect(url_for('dashboard'))
+    except Exception as e:
+        log_event(f"Google OAuth Authentication Error: {e}", "ERROR", "AUTH")
+        return redirect('/?error=oauth_failed')
+
+
+@app.route('/api/user_info', methods=['GET'])
 def user_info():
+    """Get currently authenticated operator profile
+    ---
+    tags:
+      - Authentication
+    responses:
+      200:
+        description: Authenticated user details
+      401:
+        description: Unauthorized / not logged in
+    """
     if 'user' in session:
         return jsonify({'username': session['user']})
     return jsonify({'error': 'Not logged in'}), 401
@@ -723,6 +1187,18 @@ def user_info():
 
 @app.route('/api/delete_account', methods=['POST'])
 def delete_account():
+    """Permanently purge authenticated operator account
+    ---
+    tags:
+      - Authentication
+    responses:
+      200:
+        description: Account permanently purged
+      401:
+        description: Unauthorized
+      500:
+        description: Deletion error
+    """
     if 'user' not in session:
         return jsonify({'error': 'Unauthorized'}), 401
     try:
@@ -735,8 +1211,16 @@ def delete_account():
         return jsonify({'error': str(e)}), 500
 
 
-@app.route('/api/system_logs')
+@app.route('/api/system_logs', methods=['GET'])
 def system_logs():
+    """Retrieve system telemetry logs (Admin restricted)
+    ---
+    tags:
+      - System Monitoring
+    responses:
+      200:
+        description: List of telemetry log events
+    """
     if session.get('user') != 'Yoge':
         return jsonify([])
     return jsonify(list(reversed(SERVER_LOGS)))
@@ -744,6 +1228,14 @@ def system_logs():
 
 @app.route('/api/logout', methods=['POST'])
 def logout():
+    """Terminate operator session
+    ---
+    tags:
+      - Authentication
+    responses:
+      200:
+        description: Session cleared successfully
+    """
     session.clear()
     return jsonify({'success': True})
 

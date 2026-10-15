@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -10,16 +10,13 @@
     <meta name="theme-color" content="#05080a">
     <meta name="msapplication-navbutton-color" content="#05080a">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  
 
     <meta name="description" content="Free AI tool to detect fake job postings and recruitment scams. Paste any job description to instantly analyze it for fraud indicators using Machine Learning and NLP.">
-
     <meta name="keywords" content="fake job detector, scam detection, recruitment fraud, AI job analyzer, NLP scam scanner, jobguard ai, yoge-2004, online safety tools">
-
     <meta name="author" content="Yoge-2004">
     <meta name="application-name" content="JobGuard AI">
-
     <meta name="robots" content="index, follow">
+
     <link rel="canonical" href="https://yoge-2004-fake-job-detector.hf.space">
     
     <meta property="og:type" content="website">
@@ -43,6 +40,15 @@
     <canvas id="matrixCanvas"></canvas>
 
     <div class="auth-wrapper">
+        <div class="top-nav-bar">
+            <a href="/docs" target="_blank" class="nav-icon-link" title="OpenAPI / Swagger Docs" aria-label="Swagger Documentation">
+                <i class="fa-solid fa-book"></i>
+            </a>
+            <button type="button" class="theme-toggle-btn" id="themeToggleBtn" title="Toggle Light/Dark Theme" aria-label="Toggle Theme">
+                <i class="fa-solid fa-sun"></i>
+            </button>
+        </div>
+
         <div class="logo-area">
             <h1>JOBGUARD_AI</h1>
             <p>:: ACCESS_CONTROL_TERMINAL ::</p>
@@ -59,8 +65,8 @@
                 
                 <div class="input-group">
                     <i class="fa-solid fa-key icon"></i>
-                    <input type="password" id="loginPass" class="password-field" placeholder="PASSWORD" required>
-                    <button type="button" class="password-toggle"><i class="fa-solid fa-eye"></i></button>
+                    <input type="password" id="loginPass" class="password-field" placeholder="PASSWORD" required autocomplete="current-password">
+                    <button type="button" class="password-toggle" aria-label="Toggle password view"><i class="fa-solid fa-eye"></i></button>
                 </div>
 
                 <div class="options">
@@ -77,6 +83,15 @@
                 </button>
             </form>
             
+            <div class="oauth-divider">
+                <span>OR FAST-TRACK AUTH</span>
+            </div>
+
+            <a href="/api/auth/google/login" class="oauth-google-btn" id="googleLoginBtn">
+                <i class="fa-brands fa-google"></i>
+                <span>SIGN IN WITH GOOGLE</span>
+            </a>
+            
             <div class="switch-mode">
                 <span>NEW OPERATOR?</span>
                 <a href="#" id="showSignup">ESTABLISH ID</a>
@@ -89,21 +104,55 @@
             <form id="signupForm">
                 <div class="input-group">
                     <i class="fa-solid fa-user icon"></i>
-                    <input type="text" id="signupUser" placeholder="CHOOSE USERNAME" required>
+                    <input type="text" id="signupUser" placeholder="CHOOSE USERNAME" required autocomplete="username">
                     <span class="validation-msg" id="userMsg"></span>
                 </div>
 
                 <div class="input-group">
                     <i class="fa-solid fa-envelope icon"></i>
-                    <input type="email" id="signupEmail" placeholder="EMAIL ADDRESS" required>
+                    <input type="email" id="signupEmail" placeholder="EMAIL ADDRESS" required autocomplete="email">
                     <span class="validation-msg" id="emailMsg"></span>
                 </div>
                 
                 <div class="input-group">
                     <i class="fa-solid fa-key icon"></i>
-                    <input type="password" id="signupPass" class="password-field" placeholder="PASSWORD" required>
-                    <button type="button" class="password-toggle"><i class="fa-solid fa-eye"></i></button>
+                    <input type="password" id="signupPass" class="password-field" placeholder="PASSWORD" required autocomplete="new-password">
+                    <button type="button" class="password-toggle" aria-label="Toggle password view"><i class="fa-solid fa-eye"></i></button>
                     <span class="validation-msg" id="passMsg"></span>
+                </div>
+
+                <!-- Password Strength Meter & Constraints Checklist -->
+                <div class="password-security-panel" id="passwordSecurityPanel">
+                    <div class="strength-meter-row">
+                        <span class="strength-title">// SECURITY LEVEL:</span>
+                        <span class="strength-status" id="strengthStatus">WAITING...</span>
+                    </div>
+                    <div class="strength-bar-bg">
+                        <div class="strength-bar-fill" id="strengthFill"></div>
+                    </div>
+                    
+                    <div class="constraint-grid" id="constraintGrid">
+                        <div class="constraint-item" id="c-length">
+                            <i class="fa-solid fa-circle-xmark"></i>
+                            <span>8+ CHARS</span>
+                        </div>
+                        <div class="constraint-item" id="c-upper">
+                            <i class="fa-solid fa-circle-xmark"></i>
+                            <span>UPPERCASE (A-Z)</span>
+                        </div>
+                        <div class="constraint-item" id="c-lower">
+                            <i class="fa-solid fa-circle-xmark"></i>
+                            <span>LOWERCASE (a-z)</span>
+                        </div>
+                        <div class="constraint-item" id="c-number">
+                            <i class="fa-solid fa-circle-xmark"></i>
+                            <span>NUMBER (0-9)</span>
+                        </div>
+                        <div class="constraint-item" id="c-special">
+                            <i class="fa-solid fa-circle-xmark"></i>
+                            <span>SYMBOL (!@#$%)</span>
+                        </div>
+                    </div>
                 </div>
 
                 <button type="submit" class="cyber-btn" id="regBtn" disabled>
@@ -111,12 +160,24 @@
                 </button>
             </form>
             
+            <div class="oauth-divider">
+                <span>OR FAST-TRACK REGISTRATION</span>
+            </div>
+
+            <a href="/api/auth/google/login" class="oauth-google-btn" id="googleSignupBtn">
+                <i class="fa-brands fa-google"></i>
+                <span>SIGN UP WITH GOOGLE</span>
+            </a>
+            
             <div class="switch-mode">
                 <span>EXISTING ID?</span>
                 <a href="#" id="showLogin">RETURN TO LOGIN</a>
             </div>
         </div>
     </div>
+
+    <!-- TOAST NOTIFICATIONS -->
+    <div id="cyberToastContainer" class="cyber-toast-container" aria-live="polite"></div>
 
     <script src="{{ url_for('static', filename='js/login.js') }}"></script>
 </body>

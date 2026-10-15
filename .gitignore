@@ -1,0 +1,65 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Unit test / coverage / playwright reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+playwright-report/
+test-results/
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# PyCharm - keep runConfigurations
+.idea/dataSources/
+.idea/dataSources.local.xml
+.idea/workspace.xml
+.idea/shelf/
+.idea/tasks.xml
+.idea/usageTracker.xml
+
+# Local secrets / environment
+.env
+.env.local

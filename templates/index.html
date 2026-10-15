@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -61,10 +61,16 @@
                 </div>
                 
                 <div class="action-buttons">
-                    <button class="logout-btn delete-btn" id="deleteAccountBtn" title="Delete Account">
+                    <a href="/docs" target="_blank" class="logout-btn docs-btn" title="OpenAPI / Swagger Documentation" aria-label="Swagger Documentation">
+                        <i class="fa-solid fa-book"></i>
+                    </a>
+                    <button type="button" class="logout-btn theme-toggle-btn" id="themeToggleBtn" title="Toggle Light/Dark Theme" aria-label="Toggle Light/Dark Theme">
+                        <i class="fa-solid fa-sun"></i>
+                    </button>
+                    <button type="button" class="logout-btn delete-btn" id="deleteAccountBtn" title="Delete Account" aria-label="Delete Account">
                         <i class="fa-solid fa-trash"></i>
                     </button>
-                    <button class="logout-btn" id="logoutBtn" title="Logout">
+                    <button type="button" class="logout-btn" id="logoutBtn" title="Logout" aria-label="Logout">
                         <i class="fa-solid fa-power-off"></i>
                     </button>
                 </div>
@@ -80,7 +86,7 @@
                 
                 <div class="input-zone">
                     <div class="textarea-container">
-                        <textarea id="jobDescription" placeholder="// AWAITING_DATA_STREAM..."></textarea>
+                        <textarea id="jobDescription" placeholder="// AWAITING_DATA_STREAM... Paste job posting description here to begin threat analysis."></textarea>
                         <div class="scan-laser"></div>
                         <div class="corner c-tl"></div><div class="corner c-tr"></div>
                         <div class="corner c-bl"></div><div class="corner c-br"></div>
@@ -99,7 +105,7 @@
 
                 <div id="loader" class="loader-module hidden">
                     <div class="bar-loader"></div>
-                    <span>DECRYPTING DATA...</span>
+                    <span id="loaderStatusText">DECRYPTING &amp; RUNNING MULTI-MODAL INFERENCE...</span>
                 </div>
 
                 <div id="resultContainer" class="terminal-output hidden">
@@ -112,7 +118,7 @@
                         <span id="confidenceScore">0%</span>
                     </div>
                     <div class="log-output">
-                        <p id="verdictMessage"></p>
+                        <div id="verdictMessage"></div>
                     </div>
                 </div>
             </section>
@@ -146,9 +152,9 @@
 
                 <div class="live-logs">
                     <div class="log-header-row">
-                        <div class="log-title">>> SYSTEM LOGS</div>
+                        <div class="log-title">> SYSTEM LOGS</div>
                         <button id="copyLogsBtn" class="copy-btn" title="Copy Logs">
-                            <i class="fa-solid fa-copy"></i> COPY
+                            <i class="fa-solid fa-copy"></i> <span class="copy-text">COPY</span>
                         </button>
                     </div>
                     <ul class="log-list">
@@ -158,6 +164,36 @@
             </section>
         </div>
     </div>
+
+    <!-- CYBERPUNK CUSTOM MODAL / CONFIRMATION DIALOG -->
+    <div id="cyberModal" class="cyber-modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="cyberModalTitle">
+        <div class="cyber-modal-box">
+            <div class="modal-corner mc-tl"></div>
+            <div class="modal-corner mc-tr"></div>
+            <div class="modal-corner mc-bl"></div>
+            <div class="modal-corner mc-br"></div>
+            <div class="cyber-modal-header">
+                <div class="modal-title-wrap">
+                    <span class="modal-indicator"></span>
+                    <span class="modal-title" id="cyberModalTitle">// SYSTEM PROMPT</span>
+                </div>
+                <button type="button" class="modal-close-btn" id="cyberModalClose" aria-label="Close dialog">&times;</button>
+            </div>
+            <div class="cyber-modal-body">
+                <div id="cyberModalIcon" class="modal-icon"></div>
+                <div class="modal-text-content">
+                    <div id="cyberModalMessage" class="modal-message"></div>
+                </div>
+            </div>
+            <div class="cyber-modal-actions" id="cyberModalActions">
+                <button type="button" class="modal-btn modal-btn-cancel" id="cyberModalCancel">ABORT</button>
+                <button type="button" class="modal-btn modal-btn-confirm" id="cyberModalConfirm">CONFIRM</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- CYBERPUNK TOAST NOTIFICATION CONTAINER -->
+    <div id="cyberToastContainer" class="cyber-toast-container" aria-live="polite"></div>
 
     <script src="{{ url_for('static', filename='js/script.js') }}"></script>
 </body>
