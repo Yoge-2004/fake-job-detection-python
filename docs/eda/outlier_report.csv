@@ -1,0 +1,12 @@
+feature,outliers,outlier_%
+has_company_logo,0,0.0
+has_questions,6105,17.91
+desc_length,499,1.46
+caps_ratio,632,1.85
+num_exclamations,5561,16.32
+urgency_score,103,0.3
+money_mention_count,533,1.56
+has_email_in_desc,825,2.42
+has_phone_in_desc,2985,8.76
+is_admin_role,7813,22.93
+has_social_mention,3648,10.7

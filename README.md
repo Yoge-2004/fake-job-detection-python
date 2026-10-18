@@ -11,7 +11,7 @@ license: mit
 # JobGuard: Neuro-Symbolic Fraud Detection System
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Python](https://img.shields.io/badge/Python-3.12%2B-blue)](https://www.python.org/)
+[![Python](https://img.shields.io/badge/Python-3.12%20%7C%203.13-blue)](https://www.python.org/)
 [![Kaggle AI Trained](https://img.shields.io/badge/Kaggle%20AI-Python%203.13%20%7C%202x%20Tesla%20T4-20BEFF)](https://www.kaggle.com/)
 [![Backend](https://img.shields.io/badge/Backend-Flask%203.1-red)](https://flask.palletsprojects.com/)
 [![OAuth 2.0](https://img.shields.io/badge/Auth-Google%20OAuth%202.0-4285F4)](https://developers.google.com/identity/protocols/oauth2)
@@ -23,18 +23,20 @@ license: mit
 
 ## 📋 Table of Contents
 1. [📌 Executive Overview](#overview)
-2. [🧪 Kaggle AI Training Environment & Model Specifications](#kaggle-specifications)
-3. [🔬 Deep Dive: The Neuro-Symbolic Architecture](#architecture)
-4. [✨ Key Features & Capabilities](#features)
-5. [🔐 Google OAuth 2.0 Integration & Setup](#oauth-setup)
-6. [📚 Frameworks & Library Specifications](#frameworks)
-7. [📁 Project Structure](#project-structure)
-8. [⚙️ Installation & Deployment](#installation)
-9. [📖 OpenAPI / Swagger Documentation](#swagger-docs)
-10. [🧪 Automated Test Suites (PyTest & Playwright)](#testing-suites)
-11. [💻 PyCharm Run Configurations](#pycharm-setup)
-12. [👤 Author & Acknowledgments](#author)
-13. [📜 License](#license)
+2. [📱 Cross-Device Responsive UI Showcase](#ui-showcase)
+3. [🧪 Kaggle AI Training Environment & Model Specifications](#kaggle-specifications)
+4. [🔬 Deep Dive: The Neuro-Symbolic Architecture](#architecture)
+5. [📊 Exploratory Data Analysis (EDA) & Feature Insights](#eda-insights)
+6. [✨ Key Features & Capabilities](#features)
+7. [🔐 Google OAuth 2.0 Integration & Setup](#oauth-setup)
+8. [📚 Frameworks & Library Specifications](#frameworks)
+9. [📁 Project Structure](#project-structure)
+10. [⚙️ Installation & Deployment](#installation)
+11. [📖 OpenAPI / Swagger Documentation](#swagger-docs)
+12. [🧪 Automated Test Suites (PyTest & Playwright)](#testing-suites)
+13. [💻 PyCharm Run Configurations](#pycharm-setup)
+14. [👤 Author & Acknowledgments](#author)
+15. [📜 License](#license)
 
 ---
 
@@ -48,6 +50,28 @@ license: mit
 - **0.9942 ROC-AUC Score**
 - **100% Scam Recall** across verified benchmark attacks
 - **Sub-200ms Inference Latency** via INT8 dynamic quantization and full-document Sliding-Window Max-Gated Multiple Instance Learning (MIL).
+
+---
+
+<a id='ui-showcase'></a>
+## 📱 Cross-Device Responsive UI Showcase
+
+JobGuard features a responsive, high-density neural defense terminal engineered for Desktop workstations, field tablets, and mobile devices. Operators can seamlessly toggle between the **Cyberpunk Terminal Dark Theme** (default) and the **Clean Corporate Light Theme** with live CSS custom property bindings and dynamic Matrix animation recoloring.
+
+### 🖥️ Desktop Workstation Grid (1440 × 900)
+| Cyberpunk Terminal (Dark Mode) | Clean Corporate (Light Mode) |
+|:---:|:---:|
+| ![Desktop Dark](docs/images/dashboard_desktop_dark.png) | ![Desktop Light](docs/images/dashboard_desktop_light.png) |
+
+### 📟 Tablet Operator Console (iPad Pro 820 × 1180)
+| Tablet Defense Console (Dark Theme) | Tablet Defense Console (Light Theme) |
+|:---:|:---:|
+| <img src="docs/images/dashboard_tablet_dark.png" width="460" alt="Tablet Dark Console" /> | <img src="docs/images/dashboard_tablet_light.png" width="460" alt="Tablet Light Console" /> |
+
+### 📱 Mobile Defense View (iPhone 15 Pro 393 × 852) & Auth Gateway
+| Mobile Scan Result (Dark) | Mobile Scan Result (Light) | Identification Terminal | Mobile Auth Gateway |
+|:---:|:---:|:---:|:---:|
+| <img src="docs/images/dashboard_mobile_dark.png" width="220" alt="Mobile Dark" /> | <img src="docs/images/dashboard_mobile_light.png" width="220" alt="Mobile Light" /> | <img src="docs/images/auth_terminal_dark.png" width="220" alt="Desktop Auth Terminal" /> | <img src="docs/images/auth_terminal_mobile.png" width="220" alt="Mobile Auth Terminal" /> |
 
 ---
 
@@ -79,7 +103,7 @@ All models (`models/best_bert_fusion.pth`, `models/autoencoder.keras`, `models/i
 | **Scikit-Learn** | **1.6.1** | Meta-ensemble (`MLPClassifier`, `GradientBoostingClassifier`, `LogisticRegression`, `IsolationForest`) |
 | **Joblib** | **1.3.2** | Scaler and scikit-learn model artifact serialization |
 | **LIME** | **0.2.0.1** | Model-agnostic local explainability perturbation |
-| **NumPy** | **2.0.2** | Tensor transformations and numerical feature vectors |
+| **NumPy** | **2.0.2 / 2.1.3** | Tensor transformations and numerical feature vectors |
 | **Pandas** | **2.2.2** | Dataset curation, balancing, and cleaning pipeline |
 
 > [!IMPORTANT]
@@ -139,7 +163,7 @@ flowchart TD
 
 ### Phase 3: Calibrated Meta-Ensemble
 Predictions are aggregated through a Soft-Voting Meta-Ensemble:
-$$P_{\\text{ensemble}} = \\frac{1}{3} \\left(P_{\\text{MLP}} + P_{\\text{GBM}} + P_{\\text{LogReg}}\\right)$$
+$$P_{\text{ensemble}} = \frac{1}{3} \left(P_{\text{MLP}} + P_{\text{GBM}} + P_{\text{LogReg}}\right)$$
 
 ### Phase 4: S-BERT Semantic Anchor Matching
 - Evaluates cosine similarity against 50+ pre-indexed fraudulent tactics using `all-MiniLM-L12-v2`.
@@ -149,6 +173,52 @@ $$P_{\\text{ensemble}} = \\frac{1}{3} \\left(P_{\\text{MLP}} + P_{\\text{GBM}} +
 - **Crypto & Wallet Trap:** Blocks payment solicitation via BTC, ETH, USDT, Tron, or Telegram wallets.
 - **Off-Platform Communication Alert:** Flags illicit redirections to Telegram handles, WhatsApp vanity numbers, or Signal channels.
 - **Pay-to-Work Guard:** Detects demands for training fees, equipment deposits, or background check purchases.
+
+---
+
+<a id='eda-insights'></a>
+## 📊 Exploratory Data Analysis (EDA) & Feature Insights
+
+Comprehensive exploratory data analysis, feature distributions, and forensic calibration metrics extracted from the 28,351 unique recruitment postings dataset:
+
+### 1. Dataset Completeness & Target Distribution
+| Missing Values Matrix | 50/50 Balanced Target Distribution |
+|:---:|:---:|
+| ![Missing Values](docs/eda/01_missing_values.png) | ![Target Distribution](docs/eda/02_target_distribution.png) |
+
+### 2. Feature Distributions & Target Discrepancies
+| Numerical Feature Distributions | Boxplots by Target (Genuine vs. Scam) |
+|:---:|:---:|
+| ![Numerical Distributions](docs/eda/03_numerical_distributions.png) | ![Boxplots by Target](docs/eda/04_boxplots_by_target.png) |
+
+### 3. Binary Signals & Specific Fraud Probabilities
+| Binary Indicator Distributions | Fraud Rates per Binary Indicator |
+|:---:|:---:|
+| ![Binary Features](docs/eda/05_binary_features_distribution.png) | ![Fraud Rates](docs/eda/06_binary_feature_fraud_rates.png) |
+
+### 4. Correlation Analysis & Feature Ranking
+| Feature Correlation Heatmap | Feature Correlations with Fraud Target |
+|:---:|:---:|
+| ![Correlation Heatmap](docs/eda/07_correlation_heatmap.png) | ![Feature Correlations](docs/eda/08_feature_correlations_with_target.png) |
+
+### 5. Linguistic Profiling & High-Risk Lexicons
+| Description Length Analysis | Wordcloud Comparison (Genuine vs. Fraudulent) |
+|:---:|:---:|
+| ![Description Length](docs/eda/09_desc_length_analysis.png) | ![Wordclouds](docs/eda/10_wordcloud_comparison.png) |
+
+### 6. Exploited Job Titles & Neural Convergence
+| Top Targeted Job Titles | BERTFusion Training & Validation History |
+|:---:|:---:|
+| ![Top Job Titles](docs/eda/11_top_job_titles.png) | ![BERT History](docs/eda/12_bert_training_history.png) |
+
+### 7. Forensic Anomaly Thresholds & Metric Calibration
+| Autoencoder Reconstruction Error Separation | ROC & Precision-Recall Curves |
+|:---:|:---:|
+| ![Autoencoder Distribution](docs/eda/13_autoencoder_reconstruction_distribution.png) | ![ROC Curves](docs/eda/14_roc_and_pr_curves.png) |
+
+| Multi-Subgroup Confusion Matrix | Meta-Ensemble Feature Importance & Calibration |
+|:---:|:---:|
+| ![Confusion Matrix](docs/eda/15_confusion_matrix_and_subgroups.png) | ![Calibration](docs/eda/16_meta_feature_importance_and_calibration.png) |
 
 ---
 
@@ -198,21 +268,21 @@ Below is the verified production runtime stack (managed with `uv`):
 
 | Package | Local Version | Role in JobGuard Engine |
 |:--------|:--------------|:------------------------|
-| `python` | `>=3.12` (Tested on 3.12 & 3.13) | Runtime language |
-| `flask` | `3.1.0` | Production WSGI Web Framework |
+| `python` | `>=3.12, <3.14` (Supports 3.12 & 3.13) | Runtime language |
+| `flask` | `3.1.2` | Production WSGI Web Framework |
 | `flasgger` | `0.9.7.1` | OpenAPI / Swagger 2.0 auto-generator |
 | `authlib` | `1.9.1` | OAuth 2.0 & OpenID Connect client |
-| `torch` | `2.8.0` / `2.6.0+` | PyTorch runtime & dynamic quantization |
+| `torch` | `2.8.0` | PyTorch runtime & dynamic quantization |
 | `transformers` | `4.57.1` | Hugging Face DistilBERT tokenizer & model |
 | `sentence-transformers` | `5.2.2` | Semantic search embeddings |
 | `tensorflow-cpu` | `2.19.0` | TensorFlow runtime for Keras models |
-| `keras` | `3.10.0+` | Keras 3 neural network deserialization |
+| `keras` | `3.10.0` | Keras 3 neural network deserialization |
 | `scikit-learn` | `1.6.1` | Voting Ensemble & Isolation Forest inference |
 | `lime` | `0.2.0.1` | Explainable AI (XAI) perturbations |
 | `pyenchant` | `3.2.2` | Spell-checking dictionary validator |
 | `wordfreq` | `3.1.1` | Zipf lexical frequency analyzer |
 | `pytest` | `9.1.1` | Automated test suite framework |
-| `playwright` | `1.58.0` | Headless browser end-to-end UI testing |
+| `playwright` | `1.64.0` | Headless browser end-to-end UI testing |
 
 ---
 
@@ -234,6 +304,36 @@ fake-job-detection-python/
 │       ├── PyTest_Endpoints_and_Security.xml
 │       ├── PyTest_Playwright_UI_Tests.xml
 │       └── Benchmark_Model_Inference.xml
+│
+├── docs/                             # Documentation & Visual Assets
+│   ├── eda/                          # 16 High-Res EDA Graphs & Forensic Reports
+│   │   ├── 01_missing_values.png
+│   │   ├── 02_target_distribution.png
+│   │   ├── 03_numerical_distributions.png
+│   │   ├── 04_boxplots_by_target.png
+│   │   ├── 05_binary_features_distribution.png
+│   │   ├── 06_binary_feature_fraud_rates.png
+│   │   ├── 07_correlation_heatmap.png
+│   │   ├── 08_feature_correlations_with_target.png
+│   │   ├── 09_desc_length_analysis.png
+│   │   ├── 10_wordcloud_comparison.png
+│   │   ├── 11_top_job_titles.png
+│   │   ├── 12_bert_training_history.png
+│   │   ├── 13_autoencoder_reconstruction_distribution.png
+│   │   ├── 14_roc_and_pr_curves.png
+│   │   ├── 15_confusion_matrix_and_subgroups.png
+│   │   ├── 16_meta_feature_importance_and_calibration.png
+│   │   ├── descriptive_statistics.csv
+│   │   └── outlier_report.csv
+│   └── images/                       # Cross-Device UI Showcase Assets
+│       ├── dashboard_desktop_dark.png
+│       ├── dashboard_desktop_light.png
+│       ├── dashboard_tablet_dark.png
+│       ├── dashboard_tablet_light.png
+│       ├── dashboard_mobile_dark.png
+│       ├── dashboard_mobile_light.png
+│       ├── auth_terminal_dark.png
+│       └── auth_terminal_mobile.png
 │
 ├── models/                           # SOTA Serialized Model Artifacts (Kaggle Trained)
 │   ├── best_bert_fusion.pth          # PyTorch DistilBERT + Heuristic Fusion Model
