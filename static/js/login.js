@@ -9,6 +9,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function applyTheme(theme) {
         document.documentElement.setAttribute('data-theme', theme);
         localStorage.setItem('jobGuardTheme', theme);
+        localStorage.setItem('jobguard_theme', theme);
         if (themeToggleBtn) {
             const icon = themeToggleBtn.querySelector('i');
             if (icon) {
@@ -19,6 +20,13 @@ document.addEventListener('DOMContentLoaded', () => {
                     icon.className = 'fa-solid fa-sun';
                     themeToggleBtn.title = "Switch to Light Theme";
                 }
+            }
+        }
+        const c = document.getElementById('matrixCanvas');
+        if (c) {
+            const cCtx = c.getContext('2d');
+            if (cCtx) {
+                cCtx.clearRect(0, 0, c.width, c.height);
             }
         }
     }
@@ -106,20 +114,24 @@ document.addEventListener('DOMContentLoaded', () => {
             columns = Math.floor(canvas.width / fontSize);
             drops = [];
             for (let x = 0; x < columns; x++) {
-                drops[x] = Math.floor(Math.random() * -100);
+                drops[x] = Math.floor(Math.random() * (canvas.height / fontSize));
             }
         }
 
         const draw = () => {
             const currentTheme = document.documentElement.getAttribute('data-theme') || 'dark';
-            ctx.fillStyle = currentTheme === 'light' ? 'rgba(240, 244, 248, 0.08)' : 'rgba(5, 8, 10, 0.05)';
+            const isLight = currentTheme === 'light';
+
+            // High-clarity fade trail matching theme background
+            ctx.fillStyle = isLight ? 'rgba(241, 245, 249, 0.14)' : 'rgba(5, 8, 10, 0.08)';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
-            ctx.font = fontSize + 'px monospace';
+            ctx.font = `700 ${fontSize}px 'JetBrains Mono', monospace`;
 
             for (let i = 0; i < drops.length; i++) {
                 const text = alphabet.charAt(Math.floor(Math.random() * alphabet.length));
-                if (currentTheme === 'light') {
-                    ctx.fillStyle = Math.random() > 0.85 ? '#008fa8' : '#008751';
+                if (isLight) {
+                    // Deep high-contrast cyber teal and emerald green for high visibility on light background
+                    ctx.fillStyle = Math.random() > 0.85 ? '#0284c7' : '#047857';
                 } else {
                     ctx.fillStyle = Math.random() > 0.9 ? '#00f3ff' : '#00ff9d';
                 }

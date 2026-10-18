@@ -23,7 +23,7 @@
     --bar-track: #222222;
     --panel-shadow: 0 0 40px rgba(0, 0, 0, 0.5);
     --laser-color: #00f3ff;
-    --matrix-opacity: 0.12;
+    --matrix-opacity: 0.28;
 
     --font-ui: 'Rajdhani', sans-serif;
     --font-code: 'JetBrains Mono', monospace;
@@ -55,7 +55,7 @@
     --bar-track: #e2e8f0;
     --panel-shadow: 0 8px 30px rgba(0, 143, 168, 0.12);
     --laser-color: #008fa8;
-    --matrix-opacity: 0.05;
+    --matrix-opacity: 0.65;
 
     --state-color: #008fa8;
 }
@@ -166,7 +166,7 @@ body {
     left: 0;
     width: 100%;
     height: 100%;
-    z-index: -10;
+    z-index: 0;
     opacity: var(--matrix-opacity);
     pointer-events: none;
     transition: opacity 0.3s ease;
@@ -190,7 +190,7 @@ body {
     position: fixed;
     inset: 0;
     pointer-events: none;
-    z-index: -5;
+    z-index: 1;
 }
 
 .threat-obj {
@@ -235,6 +235,7 @@ body {
 .interface-wrapper {
     width: 95%;
     max-width: 1200px;
+    position: relative;
     z-index: 10;
     padding: 20px 0;
 }
