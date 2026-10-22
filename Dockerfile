@@ -1,4 +1,4 @@
-FROM python:3.12
+FROM python:3.13
 
 COPY --from=ghcr.io/astral-sh/uv:0.8.15 /uv /uvx /bin/
 
@@ -20,6 +20,7 @@ ENV PATH="/code/.venv/bin:${PATH}"
 ENV HF_HOME="/code/.cache/huggingface"
 ENV TRANSFORMERS_CACHE="/code/.cache/huggingface/hub"
 ENV SENTENCE_TRANSFORMERS_HOME="/code/.cache/sentence-transformers"
+ENV USE_TF="0"
 
 # Warm the Hugging Face caches during build so container startup does not block
 # on model downloads in constrained runtimes such as Spaces cold starts.
