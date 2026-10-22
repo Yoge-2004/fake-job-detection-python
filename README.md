@@ -11,7 +11,7 @@ license: mit
 # JobGuard: Neuro-Symbolic Fraud Detection System
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Python](https://img.shields.io/badge/Python-3.12%20%7C%203.13-blue)](https://www.python.org/)
+[![Python](https://img.shields.io/badge/Python-3.12-blue)](https://www.python.org/)
 [![Kaggle AI Trained](https://img.shields.io/badge/Kaggle%20AI-Python%203.13%20%7C%202x%20Tesla%20T4-20BEFF)](https://www.kaggle.com/)
 [![Backend](https://img.shields.io/badge/Backend-Flask%203.1-red)](https://flask.palletsprojects.com/)
 [![OAuth 2.0](https://img.shields.io/badge/Auth-Google%20OAuth%202.0-4285F4)](https://developers.google.com/identity/protocols/oauth2)
@@ -268,7 +268,7 @@ Below is the verified production runtime stack (managed with `uv`):
 
 | Package | Local Version | Role in JobGuard Engine |
 |:--------|:--------------|:------------------------|
-| `python` | `>=3.12, <3.14` (Supports 3.12 & 3.13) | Runtime language |
+| `python` | `3.12` (Container Runtime; TensorFlow-CPU binary wheel certified) | Runtime language |
 | `flask` | `3.1.2` | Production WSGI Web Framework |
 | `flasgger` | `0.9.7.1` | OpenAPI / Swagger 2.0 auto-generator |
 | `authlib` | `1.9.1` | OAuth 2.0 & OpenID Connect client |
@@ -343,6 +343,15 @@ fake-job-detection-python/
 │   ├── bert_scaler.pkl               # Linguistic Feature Normalizer
 │   └── tabular_scaler.pkl            # Structural Feature Normalizer
 │
+├── dataset/                          # Existing and curated training data
+│   ├── final_balanced_dataset.csv    # Existing dataset
+│   ├── training_merged_dataset.csv   # Deduplicated merged dataset
+│   ├── validation_holdout.csv        # Reserved validation examples
+│   ├── test_holdout.csv              # Reserved test examples
+│   ├── build_training_dataset.py    # Pinned, reproducible data builder
+│   ├── dataset_manifest.csv          # Source and duplicate-group metadata
+│   └── README.md                    # Provenance, limits, and rebuild steps
+│
 ├── static/                           # Client-Side Assets
 │   ├── css/
 │   │   ├── style.css                 # Dashboard Cyberpunk & Light Theme Styling
@@ -390,6 +399,12 @@ export GOOGLE_CLIENT_SECRET="your_client_secret"
 uv run python app.py
 ```
 Open [http://localhost:7860](http://localhost:7860) in your web browser.
+
+### Rebuild the curated training dataset
+```bash
+uv run python dataset/build_training_dataset.py
+```
+This creates the merged CSV and provenance reports described in [dataset/README.md](dataset/README.md). It prepares data for retraining; it does not replace the currently deployed model artifacts.
 
 ### Option B: Docker Container
 ```bash
